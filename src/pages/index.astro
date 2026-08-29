@@ -180,7 +180,7 @@ const products = (shop.products || []).filter((p: any) => p.is_active !== false)
         cart.push({ id, name, price, mrp, image, qty: 1 });
       }
       saveCart();
-      showShopToast('Item Added to Cart', `${name} is in your cart!`, '🛍️');
+      toggleCartDrawer(true);
     }
 
     function updateCartQty(id, delta) {
