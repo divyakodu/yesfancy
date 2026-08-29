@@ -138,7 +138,8 @@ const products = (shop.products || []).filter((p: any) => p.is_active !== false)
 
       <button 
         onclick="submitWhatsAppOrder()" 
-        class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-widest rounded flex items-center justify-center space-x-2 cursor-pointer shadow-md transition-colors"
+        style={`background-color: ${primaryColor}`}
+        class="w-full py-3.5 text-white font-extrabold text-xs uppercase tracking-widest rounded flex items-center justify-center space-x-2 cursor-pointer shadow-md hover:opacity-90 transition-all"
       >
         <span>💬 PLACE ORDER VIA WHATSAPP COD</span>
       </button>
