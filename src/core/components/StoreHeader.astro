@@ -82,13 +82,19 @@ const getCatalogUrl = (catId?: string) => {
           </div>
         </form>
 
-        <!-- Track Order Button -->
-        <button onclick="toggleTrackDrawer(true)" class="text-slate-800 hover:text-slate-900 cursor-pointer p-1.5 hover:bg-slate-100 rounded-full transition-colors" title="Track Your Order">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+        <!-- Explicit Track Order Button (Unmistakable on Desktop & Mobile) -->
+        <button 
+          onclick="toggleTrackDrawer(true)" 
+          class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors cursor-pointer border border-slate-300 shadow-2xs shrink-0" 
+          title="Track Your Live Orders by Mobile Number"
+        >
+          <span class="text-sm">📦</span>
+          <span class="hidden sm:inline">Track Order</span>
+          <span class="sm:hidden text-[11px]">Track</span>
         </button>
 
         <!-- Cart Drawer Button -->
-        <button onclick="toggleCartDrawer(true)" class="relative text-slate-800 hover:text-slate-900 cursor-pointer p-1.5 hover:bg-slate-100 rounded-full transition-colors">
+        <button onclick="toggleCartDrawer(true)" class="relative text-slate-800 hover:text-slate-900 cursor-pointer p-1.5 hover:bg-slate-100 rounded-full transition-colors shrink-0">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
           <span id="cart-count-badge" style={`background-color: ${primaryColor}`} class="absolute -top-0.5 -right-0.5 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">0</span>
         </button>
@@ -192,19 +198,21 @@ const getCatalogUrl = (catId?: string) => {
     }
   })();
 
-  // Robust Global Order Tracking Function
+  // Robust Global Order Tracking Function with Accordion & Progress Stepper
   window.lookupOrderStatus = async function() {
-    const input = document.getElementById('track-input')?.value.trim();
-    const statusBox = document.getElementById('track-status-box');
-    if (!input || !statusBox) return;
+    const rawInput = (document.getElementById('track-input')?.value || '').trim();
+    // Allow lookup either in store-header box or track-results-box
+    const statusBox = document.getElementById('track-results-box') || document.getElementById('track-status-box');
+    if (!rawInput || !statusBox) return;
 
     statusBox.innerHTML = `
-      <div class="text-center py-6 space-y-2">
+      <div class="text-center py-8 space-y-2">
         <div class="text-2xl animate-spin">⏳</div>
-        <div class="font-bold text-slate-800 text-xs">Checking live order status...</div>
+        <div class="font-bold text-slate-800 text-xs">Locating your orders...</div>
       </div>
     `;
 
+    const cleanInput = rawInput.replace(/\D/g, '');
     let foundOrders = [];
 
     // 1. Check local storage first
@@ -213,7 +221,10 @@ const getCatalogUrl = (catId?: string) => {
       if (localSaved) {
         const parsed = JSON.parse(localSaved);
         if (Array.isArray(parsed)) {
-          foundOrders = parsed.filter(o => (o.phone && o.phone.includes(input)) || (o.order_id && o.order_id.includes(input)));
+          foundOrders = parsed.filter(o => 
+            (cleanInput && o.phone && String(o.phone).replace(/\D/g, '').includes(cleanInput)) || 
+            (o.order_id && o.order_id.toLowerCase().includes(rawInput.toLowerCase()))
+          );
         }
       }
     } catch(e) {}
@@ -224,9 +235,13 @@ const getCatalogUrl = (catId?: string) => {
       if (res.ok) {
         const data = await res.json();
         if (data.orders && Array.isArray(data.orders)) {
-          const remoteFound = data.orders.filter(o => (o.phone && o.phone.includes(input)) || (o.order_id && o.order_id.includes(input)) || (o.customer_name && o.customer_name.toLowerCase().includes(input.toLowerCase())));
+          const remoteFound = data.orders.filter(o => 
+            (cleanInput && o.phone && String(o.phone).replace(/\D/g, '').includes(cleanInput)) || 
+            (o.order_id && o.order_id.toLowerCase().includes(rawInput.toLowerCase())) || 
+            (o.customer_name && o.customer_name.toLowerCase().includes(rawInput.toLowerCase()))
+          );
           remoteFound.forEach(ro => {
-            if (!foundOrders.some(fo => fo.order_id === ro.order_id || fo.id === ro.id)) {
+            if (!foundOrders.some(fo => fo.order_id === ro.order_id)) {
               foundOrders.push(ro);
             }
           });
@@ -236,31 +251,177 @@ const getCatalogUrl = (catId?: string) => {
 
     if (foundOrders.length === 0) {
       statusBox.innerHTML = `
-        <div class="text-center py-6 border border-dashed border-rose-300 rounded-lg space-y-2 bg-rose-50/50">
-          <div class="text-2xl">⚠️</div>
+        <div class="text-center py-8 border border-dashed border-rose-300 rounded-xl space-y-2 bg-rose-50/50 p-4">
+          <div class="text-3xl">📦</div>
           <div class="font-bold text-slate-800 text-xs">No Active Orders Found</div>
-          <div class="text-[11px] text-slate-500">No order matches phone or Order ID "${input}".</div>
+          <div class="text-[11px] text-slate-500">No recent orders matching "${rawInput}". Please check your 10-digit phone number.</div>
         </div>
       `;
-    } else {
-      statusBox.innerHTML = foundOrders.map(order => `
-        <div class="border border-slate-200 rounded-lg p-3 space-y-2 bg-slate-50 mb-3 text-left">
-          <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-            <div>
-              <span class="font-extrabold text-slate-900 text-xs">Order #${order.order_id || order.id || 'CONFIRMED'}</span>
-              <span class="text-[11px] text-slate-500 block">${order.customer_name || 'Customer'}</span>
-            </div>
-            <span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">${order.status || 'Processing'}</span>
-          </div>
-          <div class="text-[11px] text-slate-600 space-y-0.5">
-            ${Array.isArray(order.items) ? order.items.map(i => `<div>${typeof i === 'object' ? `${i.name} (Qty: ${i.qty})` : i}</div>`).join('') : `<div>${order.items || 'Items placed via WhatsApp'}</div>`}
-          </div>
-          <div class="flex justify-between items-center pt-2 border-t border-slate-200 text-xs font-bold">
-            <span>Total: ₹ ${order.total || order.total_amount || 0}</span>
-            <span class="text-[10px] text-slate-400 font-normal">${order.timestamp || order.created_at || ''}</span>
+      return;
+    }
+
+    // Sort newest first
+    foundOrders.sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    const totalOrdersCount = foundOrders.length;
+    // Cap to latest 5 orders
+    const cappedOrders = foundOrders.slice(0, 5);
+
+    const getStepperHtml = (status) => {
+      const steps = [
+        { label: 'Placed', key: 'Placed' },
+        { label: 'Packing', key: 'Packing' },
+        { label: 'Out for Delivery', key: 'Dispatched' },
+        { label: 'Delivered', key: 'Delivered' }
+      ];
+
+      let currentStepIndex = 0;
+      const s = (status || '').toLowerCase();
+      if (s.includes('delivered')) currentStepIndex = 3;
+      else if (s.includes('dispatched') || s.includes('out for delivery')) currentStepIndex = 2;
+      else if (s.includes('confirm') || s.includes('packing')) currentStepIndex = 1;
+      else currentStepIndex = 0;
+
+      return `
+        <div class="pt-3 pb-1">
+          <div class="flex items-center justify-between relative">
+            <div class="absolute left-2.5 right-2.5 top-2.5 h-0.5 bg-slate-200 -z-0"></div>
+            <div class="absolute left-2.5 top-2.5 h-0.5 bg-emerald-600 -z-0 transition-all" style="width: ${(currentStepIndex / 3) * 100}%"></div>
+            ${steps.map((st, i) => {
+              const isDone = i <= currentStepIndex;
+              const isCurrent = i === currentStepIndex;
+              return `
+                <div class="flex flex-col items-center relative z-10">
+                  <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    isDone ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'
+                  } ${isCurrent ? 'ring-3 ring-emerald-200 ring-offset-1' : ''}">
+                    ${isDone ? '✓' : i + 1}
+                  </div>
+                  <span class="text-[9px] mt-1 font-bold ${isCurrent ? 'text-emerald-700' : 'text-slate-500'} text-center">${st.label}</span>
+                </div>
+              `;
+            }).join('')}
           </div>
         </div>
-      `).join('');
+      `;
+    };
+
+    const statusBadgeColors = {
+      'Order Placed & Processing': 'bg-amber-100 text-amber-800 border-amber-200',
+      'Order Confirmed & Packing': 'bg-blue-100 text-blue-800 border-blue-200',
+      'Dispatched / Out for Delivery': 'bg-purple-100 text-purple-800 border-purple-200',
+      'Delivered': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      'Cancelled': 'bg-rose-100 text-rose-800 border-rose-200'
+    };
+
+    let html = `
+      <div class="text-[11px] font-bold text-slate-500 pb-2 flex justify-between items-center">
+        <span>Showing ${cappedOrders.length} of ${totalOrdersCount} orders</span>
+        <span class="text-emerald-700">● Live Status Active</span>
+      </div>
+      <div class="space-y-3">
+    `;
+
+    cappedOrders.forEach((order, idx) => {
+      const isFirst = idx === 0;
+      const orderId = order.order_id || 'ORDER';
+      const badgeStyle = statusBadgeColors[order.status] || 'bg-slate-100 text-slate-800 border-slate-200';
+      const itemsArr = Array.isArray(order.items) ? order.items : [order.items];
+
+      const itemRows = itemsArr.map(itemStr => {
+        const str = String(itemStr || '').replace(/^-\s*/, '');
+        const match = str.match(/^(.*?)\s*\(Qty:\s*(\d+)\)\s*(?:=\s*(?:Rs\.?\s*)?(\d+))?$/i);
+        if (match) {
+          return `
+            <div class="flex justify-between items-center py-1 text-xs border-b border-slate-100">
+              <span class="font-medium text-slate-800">${match[1]} <span class="text-slate-400 font-bold">× ${match[2]}</span></span>
+              <span class="font-bold text-slate-900">${match[3] ? `₹ ${match[3]}` : ''}</span>
+            </div>
+          `;
+        }
+        return `
+          <div class="py-1 text-xs font-medium text-slate-700 border-b border-slate-100">${str}</div>
+        `;
+      }).join('');
+
+      html += `
+        <div class="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs transition-all">
+          <!-- Accordion Header (Click to Expand / Collapse) -->
+          <button 
+            type="button" 
+            onclick="window.toggleOrderAccordion('order-acc-${orderId}')" 
+            class="w-full p-3.5 flex items-center justify-between text-left bg-slate-50 hover:bg-slate-100/70 transition-colors cursor-pointer"
+          >
+            <div class="space-y-0.5">
+              <div class="flex items-center space-x-2">
+                <span class="font-black text-slate-900 text-xs">#${orderId}</span>
+                <span class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border ${badgeStyle}">${order.status || 'Processing'}</span>
+              </div>
+              <div class="text-[10px] text-slate-400">
+                ${order.created_at ? new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Recent'}
+              </div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-xs font-extrabold text-slate-900">₹ ${order.total || 0}</span>
+              <span id="chevron-order-acc-${orderId}" class="text-slate-400 font-bold text-xs transform transition-transform ${isFirst ? 'rotate-180' : ''}">▼</span>
+            </div>
+          </button>
+
+          <!-- Accordion Collapsible Body -->
+          <div id="order-acc-${orderId}" class="${isFirst ? 'block' : 'hidden'} p-3.5 space-y-3 bg-white border-t border-slate-200">
+            <!-- 4-Step Stepper -->
+            ${getStepperHtml(order.status)}
+
+            <!-- Itemized Table / List -->
+            <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-1">
+              <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Items Ordered</div>
+              ${itemRows}
+              <div class="flex justify-between items-center pt-2 text-xs font-bold text-slate-900">
+                <span>Total COD Payable:</span>
+                <span class="text-rose-600 font-extrabold">₹ ${order.total || 0}</span>
+              </div>
+            </div>
+
+            <!-- Delivery Address -->
+            <div class="text-[11px] text-slate-600 flex items-start space-x-1.5">
+              <span class="shrink-0">📍</span>
+              <span class="font-medium">${order.address || 'Store Pickup'}</span>
+            </div>
+
+            <!-- WhatsApp Store Support Link -->
+            <div class="pt-1">
+              <button 
+                type="button" 
+                onclick="window.openWhatsAppDirect ? window.openWhatsAppDirect('919014838640', 'Hi Yes Fancy, I need an update on my Order #${orderId}.') : window.open('https://wa.me/919014838640?text=' + encodeURIComponent('Hi Yes Fancy, I need an update on my Order #${orderId}.'), '_blank')" 
+                class="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded border border-emerald-200 text-center flex items-center justify-center space-x-1.5 cursor-pointer transition-colors"
+              >
+                <span>💬 WhatsApp Store Support</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+    statusBox.innerHTML = html;
+  };
+
+  window.toggleOrderAccordion = function(accId) {
+    const body = document.getElementById(accId);
+    const chevron = document.getElementById('chevron-' + accId);
+    if (!body) return;
+    const isHidden = body.classList.contains('hidden');
+    if (isHidden) {
+      body.classList.remove('hidden');
+      if (chevron) chevron.classList.add('rotate-180');
+    } else {
+      body.classList.add('hidden');
+      if (chevron) chevron.classList.remove('rotate-180');
     }
   };
 </script>

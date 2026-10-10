@@ -275,6 +275,67 @@ const storeCatalogUrl = '/catalog';
     </div>
   </aside>
 
+  <!-- Celebratory Order Success Modal (Stylized Festive Confirmation) -->
+  <div id="order-success-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 opacity-0 pointer-events-none hidden transition-all duration-300">
+    <div id="order-success-card" class="bg-white rounded-2xl max-w-md w-full p-6 sm:p-7 text-center space-y-4 shadow-2xl border border-slate-200 transform scale-95 transition-transform duration-300 relative">
+      <button onclick="window.closeOrderSuccessModal()" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900 flex items-center justify-center transition-colors cursor-pointer" title="Close">
+        ✕
+      </button>
+
+      <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">
+        🎉
+      </div>
+
+      <div class="space-y-1">
+        <span class="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+          Order Confirmed & Received
+        </span>
+        <h3 class="font-serif-title font-extrabold text-xl text-slate-900 pt-1">Thank You For Your Order!</h3>
+        <p class="text-xs text-slate-500">
+          Order <span id="success-order-id" class="font-extrabold text-slate-900">#YF-0000</span> has been logged directly with <span class="font-bold text-slate-800">{shop?.name || 'Yes Fancy'}</span>.
+        </p>
+      </div>
+
+      <div class="bg-slate-50 rounded-xl p-3.5 border border-slate-200/80 text-left space-y-2 text-xs">
+        <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+          <span class="font-extrabold text-[10px] uppercase tracking-wider text-slate-400">Order Summary</span>
+          <span class="text-[10px] font-bold text-emerald-700">Cash on Delivery (COD)</span>
+        </div>
+
+        <div id="success-order-items" class="space-y-1.5 max-h-36 overflow-y-auto"></div>
+
+        <div class="pt-2 border-t border-slate-200 flex justify-between items-center font-extrabold text-slate-900">
+          <span>Total Payable:</span>
+          <span id="success-order-total" class="text-rose-600 text-base">₹ 0</span>
+        </div>
+      </div>
+
+      <div class="bg-slate-50 rounded-xl p-3 border border-slate-200/80 text-left text-xs flex items-start space-x-2">
+        <span class="text-base shrink-0">📍</span>
+        <div>
+          <div class="font-bold text-slate-800 text-[11px]">Delivery Destination:</div>
+          <div id="success-order-address" class="text-slate-600 text-[11px] leading-tight mt-0.5">Store Pickup</div>
+        </div>
+      </div>
+
+      <div class="space-y-2 pt-2">
+        <button 
+          onclick="window.showTrackingFromSuccess()" 
+          class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center space-x-2"
+        >
+          <span>📦</span>
+          <span>Track Order Status Live</span>
+        </button>
+        <button 
+          onclick="window.closeOrderSuccessModal()" 
+          class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase tracking-wider rounded-xl transition-colors cursor-pointer"
+        >
+          🛍️ Continue Shopping
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Cart Drawer -->
   <div id="cart-overlay" onclick="toggleCartDrawer(false)" style="transition: opacity 0.3s ease; opacity: 0; pointer-events: none;" class="fixed inset-0 bg-slate-950/60 z-50"></div>
   <aside id="cart-drawer" style="transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform: translateX(100%);" class="fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-white z-50 shadow-2xl flex flex-col justify-between">
@@ -690,12 +751,71 @@ const storeCatalogUrl = '/catalog';
       cart = {};
       window.saveCart();
       window.toggleCartDrawer(false);
+
+      // Store last placed order phone for tracking shortcut
+      window.lastPlacedOrderPhone = phoneInput;
+
+      // Populate and display the celebratory Order Success Modal
+      const successModal = document.getElementById('order-success-modal');
+      const successCard = document.getElementById('order-success-card');
+      const idElem = document.getElementById('success-order-id');
+      const itemsElem = document.getElementById('success-order-items');
+      const totalElem = document.getElementById('success-order-total');
+      const addrElem = document.getElementById('success-order-address');
+
+      if (idElem) idElem.innerText = `#${orderId}`;
+      if (totalElem) totalElem.innerText = `₹ ${totalPrice}`;
+      if (addrElem) addrElem.innerText = `${addressInput} (Customer: ${nameInput}, 📞 ${phoneInput})`;
+
+      if (itemsElem) {
+        itemsElem.innerHTML = itemLines
+          .filter(l => !l.startsWith('*'))
+          .map(line => {
+            const clean = line.replace(/^-\s*/, '');
+            const match = clean.match(/^(.*?)\s*\(Qty:\s*(\d+)\)\s*(?:=\s*(?:Rs\.?\s*)?(\d+))?/i);
+            if (match) {
+              return `
+                <div class="flex justify-between items-center py-1 border-b border-slate-100 last:border-0">
+                  <span class="font-bold text-slate-800">${match[1]} <span class="text-slate-400 font-semibold">× ${match[2]}</span></span>
+                  <span class="font-extrabold text-slate-900">${match[3] ? `₹ ${match[3]}` : ''}</span>
+                </div>
+              `;
+            }
+            return `<div class="py-0.5 text-slate-700">${clean}</div>`;
+          }).join('');
+      }
+
+      if (successModal) {
+        successModal.classList.remove('hidden');
+        successModal.classList.remove('opacity-0', 'pointer-events-none');
+      }
+      if (successCard) {
+        successCard.classList.remove('scale-95');
+        successCard.classList.add('scale-100');
+      }
+    };
+
+    window.closeOrderSuccessModal = function() {
+      const modal = document.getElementById('order-success-modal');
+      const card = document.getElementById('order-success-card');
+      if (modal) {
+        modal.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => modal.classList.add('hidden'), 300);
+      }
+      if (card) {
+        card.classList.remove('scale-100');
+        card.classList.add('scale-95');
+      }
+    };
+
+    window.showTrackingFromSuccess = function() {
+      window.closeOrderSuccessModal();
       window.toggleTrackDrawer(true);
-
       const trackInput = document.getElementById('track-input');
-      if (trackInput) trackInput.value = phoneInput;
-
-      alert(`🎉 Order #${orderId} (₹ ${totalPrice}) has been sent directly to ${currentShopName}!`);
+      if (trackInput && window.lastPlacedOrderPhone) {
+        trackInput.value = window.lastPlacedOrderPhone;
+      }
+      window.lookupOrderStatus();
     };
 
     if (document.readyState === 'loading') {
