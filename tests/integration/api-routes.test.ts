@@ -49,21 +49,23 @@ describe('Gate 3: Single-Store API Contracts (Integration Tests)', () => {
     }
   });
 
-  it('POST /api/products and DELETE /api/products should operate without shop_slug', async () => {
+  it('POST /api/products and DELETE /api/products should operate with custom badge and tags', async () => {
     const testProdId = `test_prod_${Date.now()}`;
     const createPayload = {
       id: testProdId,
-      name: 'Automated Test Product',
+      name: 'Automated Test Product With Badge & Tags',
       mrp: 500,
       discount: 20,
       price: 400,
       category_id: 'toys',
-      image_url: '/images/placeholder.webp',
+      badge: 'TOP PICK',
+      tags: ['toys', 'fun', 'kids', 'gift'],
+      image_url: '/images/products/test.webp',
       stock: 50,
       is_active: false
     };
 
-    // 1. Create product
+    // 1. Create product with badge and tags
     const createRes = await createProduct({
       request: new Request('http://localhost:4321/api/products', {
         method: 'POST',
@@ -76,6 +78,14 @@ describe('Gate 3: Single-Store API Contracts (Integration Tests)', () => {
     const createBody = await createRes.json();
     assert.equal(createBody.success, true);
     assert.equal(createBody.id, testProdId);
+
+    // Verify in database
+    if (supabase) {
+      const { data: dbItem } = await supabase.from('products').select('*').eq('id', testProdId).single();
+      assert.ok(dbItem, 'Product must exist in DB');
+      assert.equal(dbItem.badge, 'TOP PICK', 'Badge must match TOP PICK');
+      assert.deepEqual(dbItem.tags, ['toys', 'fun', 'kids', 'gift'], 'Tags must match payload array');
+    }
 
     // 2. Delete product
     const deleteRes = await deleteProduct({
