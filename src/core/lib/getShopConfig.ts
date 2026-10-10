@@ -3,34 +3,16 @@ import { createClient } from '@supabase/supabase-js';
 function getSupabaseClient() {
   const url = (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.PUBLIC_SUPABASE_URL : null) 
     || (typeof process !== 'undefined' && process.env ? process.env.PUBLIC_SUPABASE_URL : null)
-    || 'https://fwrievuhudjkeffmszqf.supabase.co';
+    || 'https://ebsrmjnegdhpnlbxcxfm.supabase.co';
     
   const key = (typeof import.meta !== 'undefined' && import.meta.env ? (import.meta.env.SUPABASE_SERVICE_ROLE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY) : null) 
     || (typeof process !== 'undefined' && process.env ? (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY) : null)
-    || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3cmlldnVodWRqa2VmZm1zenFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0Mjc1MDQsImV4cCI6MjA5MDAwMzUwNH0.NrucFfwz8vsgF8kMp2aHMK_PW-4Sf-J7cCv3dpRPw0U';
+    || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVic3Jtam5lZ2RocG5sYnhjeGZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2MTY0MDAsImV4cCI6MjEwNzE5MjQwMH0.zP6UtvlbN3Hx8E2MbMcNk9fx4JUQpdCqrrvigytIN7M';
 
   if (url && key) {
     return createClient(url, key);
   }
   return null;
-}
-
-const tagLabelMap: Record<string, string> = {
-  all: 'All Products',
-  novelties: 'Gift Store',
-  decor: 'Home & Decor',
-  games: 'Games',
-  toys: 'Toys',
-  lunchbox: 'Lunch Boxes',
-  fashion: 'Beauty & Lifestyle'
-};
-
-function formatTagLabel(tag: string): string {
-  if (tagLabelMap[tag]) return tagLabelMap[tag];
-  return tag
-    .replace(/_/g, ' ')
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, char => char.toUpperCase());
 }
 
 const defaultOfferSlides = [
@@ -40,7 +22,7 @@ const defaultOfferSlides = [
     subtitle: "Curated luxury fragrances, fine jewellery & premium personal care.",
     image_url: "/images/offer_beauty_lifestyle.webp",
     tag_id: "fashion",
-    link: "/catalog?shop=yesfancy&category=fashion"
+    link: "/catalog?category=fashion"
   },
   {
     id: "slide_gift_store",
@@ -48,7 +30,7 @@ const defaultOfferSlides = [
     subtitle: "Curated luxury hampers, fancy boxes & novelties for every occasion.",
     image_url: "/images/offer_gift_store.webp",
     tag_id: "novelties",
-    link: "/catalog?shop=yesfancy&category=novelties"
+    link: "/catalog?category=novelties"
   },
   {
     id: "slide_home_decor",
@@ -56,7 +38,7 @@ const defaultOfferSlides = [
     subtitle: "Fancy minimal interiors, designer lamps & contemporary living accents.",
     image_url: "/images/offer_home_decor.webp",
     tag_id: "decor",
-    link: "/catalog?shop=yesfancy&category=decor"
+    link: "/catalog?category=decor"
   },
   {
     id: "slide_games",
@@ -64,7 +46,7 @@ const defaultOfferSlides = [
     subtitle: "Interactive arcade labyrinths, marble runs & brain exercising games.",
     image_url: "/images/offer_games.webp",
     tag_id: "games",
-    link: "/catalog?shop=yesfancy&category=games"
+    link: "/catalog?category=games"
   },
   {
     id: "slide_toys",
@@ -72,7 +54,7 @@ const defaultOfferSlides = [
     subtitle: "Functional hydraulic crane kits, robotic arms & mechanical dynamic machines.",
     image_url: "/images/offer_toys.webp",
     tag_id: "toys",
-    link: "/catalog?shop=yesfancy&category=toys"
+    link: "/catalog?category=toys"
   },
   {
     id: "slide_lunchbox",
@@ -80,7 +62,7 @@ const defaultOfferSlides = [
     subtitle: "Insulated food carriers, stylish lunch sets & travel containers.",
     image_url: "/images/offer_lunch_boxes.webp",
     tag_id: "lunchbox",
-    link: "/catalog?shop=yesfancy&category=lunchbox"
+    link: "/catalog?category=lunchbox"
   }
 ];
 
@@ -91,187 +73,147 @@ export const ORIGINAL_YESFANCY_CATEGORIES = [
   { id: 'decor', label: 'Home & Decor', sort_order: 3 },
   { id: 'games', label: 'Games', sort_order: 4 },
   { id: 'toys', label: 'Toys', sort_order: 5 },
-  { id: 'lunchbox', label: 'Lunch Boxes', sort_order: 6 }
+  { id: 'lunchbox', label: 'Lunch Boxes', sort_order: 6 },
+  { id: 'stem_toys', label: 'STEM & Robotics', sort_order: 7 }
 ];
 
-export async function getShopConfigAsync(slug: string) {
+export interface StoreConfig {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  category: string;
+  template: string;
+  phone: string;
+  announcement_text: string;
+  logo_url: string;
+  logo_animated_url: string;
+  logo_text: string;
+  features_ticker: Array<{ label: string; icon: string }>;
+  hero_slides: any[];
+  theme: {
+    primary_color: string;
+    secondary_color: string;
+    accent_color: string;
+    font_title: string;
+    font_body: string;
+  };
+  tags: any[];
+  categories: any[];
+  products: any[];
+  carousels: {
+    hero: any[];
+  };
+}
+
+/**
+ * Direct single-store configuration loader for Yes Fancy.
+ * Reads directly from single-store tables in yesfancy-db.
+ */
+export async function getStoreConfigAsync(): Promise<StoreConfig | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
   try {
-    const { data: shopRecord, error } = await supabase
-      .from('shops')
+    // 1. Fetch store settings
+    const { data: settings } = await supabase
+      .from('store_settings')
       .select('*')
-      .eq('slug', slug)
-      .single();
+      .limit(1)
+      .maybeSingle();
 
-    if (error || !shopRecord) return null;
-
-    // Fetch products belonging to this shop
-    const { data: products } = await supabase
-      .from('products')
-      .select('*')
-      .eq('shop_id', shopRecord.id);
-
-    // Fetch structured categories from categories table
+    // 2. Fetch categories
     const { data: dbCategories } = await supabase
       .from('categories')
       .select('*')
-      .eq('shop_id', shopRecord.id)
       .order('sort_order', { ascending: true });
 
-    let tagList = [];
-    if (slug === 'yesfancy') {
-      tagList = ORIGINAL_YESFANCY_CATEGORIES;
-    } else if (dbCategories && dbCategories.length > 0) {
-      tagList = dbCategories.map(c => ({
-        id: c.id,
-        label: c.label,
-        sort_order: c.sort_order
-      }));
-    } else {
-      const categoryMap = new Map<string, string>();
-      categoryMap.set('all', 'All Products');
-      (products || []).forEach((p: any) => {
-        if (p.category_id && p.category_id !== 'all') {
-          categoryMap.set(p.category_id, formatTagLabel(p.category_id));
-        }
-      });
-      tagList = Array.from(categoryMap.entries()).map(([id, label], index) => ({
-        id,
-        label,
-        sort_order: index
-      }));
-    }
+    const categories = (dbCategories && dbCategories.length > 0)
+      ? dbCategories.map(c => ({
+          id: c.id,
+          label: c.label,
+          tag: c.tag || c.id,
+          image_url: c.image_url || '',
+          sort_order: c.sort_order ?? 0
+        }))
+      : ORIGINAL_YESFANCY_CATEGORIES;
 
-    const themeObj = shopRecord.theme || {};
+    // 3. Fetch products
+    const { data: products } = await supabase
+      .from('products')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    // 4. Fetch hero slides
+    const { data: dbSlides } = await supabase
+      .from('hero_slides')
+      .select('*')
+      .order('sort_order', { ascending: true });
+
+    const heroSlides = (dbSlides && dbSlides.length > 0)
+      ? dbSlides.map(s => ({
+          ...s,
+          link: s.cta_link?.startsWith('/') ? s.cta_link : `/catalog?category=${s.cta_link || 'all'}`
+        }))
+      : defaultOfferSlides;
+
+    const defaultTicker = [
+      { label: "Easy Return", icon: "return" },
+      { label: "Quality Assured", icon: "quality" },
+      { label: "Satisfied Customers", icon: "heart" },
+      { label: "Express Dispatch", icon: "dispatch" }
+    ];
 
     return {
-      shop: {
-        id: shopRecord.id,
-        slug: shopRecord.slug,
-        name: shopRecord.name,
-        tagline: shopRecord.tagline,
-        category: shopRecord.category,
-        template: shopRecord.template_key || 'gift_shop_template_1',
-        phone: shopRecord.phone,
-        announcement_text: shopRecord.announcement_text || 'FREE SHIPPING ON ORDERS ABOVE ₹999 | EXPRESS STORE PICKUP',
-        logo_url: shopRecord.logo_url || '/images/yes_fancy_icon_transparent.png',
-        logo_animated_url: shopRecord.logo_animated_url || '/images/yes_fancy_icon_animated.gif',
-        logo_text: shopRecord.logo_text || shopRecord.name,
-        features_ticker: shopRecord.features_ticker || [
-          { label: "Easy Return", icon: "return" },
-          { label: "Quality Assured", icon: "quality" },
-          { label: "Satisfied Customers", icon: "heart" },
-          { label: "Express Dispatch", icon: "dispatch" }
-        ],
-        hero_slides: (shopRecord.hero_slides && shopRecord.hero_slides.length > 0) ? shopRecord.hero_slides : defaultOfferSlides,
-        theme: {
-          primary_color: themeObj.primary_color || '#581C87',
-          secondary_color: themeObj.secondary_color || '#D4AF37',
-          accent_color: themeObj.accent_color || '#E11D48',
-          font_title: themeObj.font_title || 'Plus Jakarta Sans',
-          font_body: themeObj.font_body || 'Plus Jakarta Sans'
-        },
-        tags: tagList,
-        categories: tagList,
-        products: (products || []).map((p: any) => ({
-          ...p,
-          image_url: p.image_url || ''
-        })),
-        carousels: {
-          hero: (shopRecord.hero_slides && shopRecord.hero_slides.length > 0) ? shopRecord.hero_slides : defaultOfferSlides
-        }
+      id: 'yesfancy',
+      slug: 'yesfancy',
+      name: settings?.name || 'Yes Fancy',
+      tagline: settings?.tagline || 'Curated Fancy Gifts, Toys, Games & Novelties',
+      category: 'Gifts & Toys',
+      template: 'GiftShopTemplate1',
+      phone: settings?.phone || '919014838640',
+      announcement_text: settings?.announcement_text || 'FREE SHIPPING ON ORDERS ABOVE ₹999 | EXPRESS STORE PICKUP',
+      logo_url: settings?.logo_url || '/images/yes_fancy_icon_transparent.png',
+      logo_animated_url: settings?.logo_animated_url || '/images/yes_fancy_icon_animated.gif',
+      logo_text: settings?.logo_text || 'Yes Fancy',
+      features_ticker: settings?.features_ticker || defaultTicker,
+      hero_slides: heroSlides,
+      theme: {
+        primary_color: settings?.primary_color || '#581C87',
+        secondary_color: settings?.secondary_color || '#D4AF37',
+        accent_color: settings?.accent_color || '#E11D48',
+        font_title: settings?.font_title || 'Plus Jakarta Sans',
+        font_body: settings?.font_body || 'Plus Jakarta Sans'
+      },
+      tags: categories,
+      categories: categories,
+      products: (products || []).map((p: any) => ({
+        ...p,
+        image_url: p.image_url && p.image_url.trim().length > 0 ? p.image_url : '/images/placeholder.webp'
+      })),
+      carousels: {
+        hero: heroSlides
       }
     };
   } catch (e) {
-    console.error('Error fetching shop config:', e);
+    console.error('Error fetching store config:', e);
     return null;
   }
 }
 
+/**
+ * Backward compatibility loader. Returns { shop: storeConfig }.
+ */
+export async function getShopConfigAsync(_slug?: string) {
+  const store = await getStoreConfigAsync();
+  if (!store) return null;
+  return { shop: store };
+}
+
+/**
+ * Backward compatibility loader for any legacy loop callers.
+ */
 export async function getAllShopsConfigAsync() {
-  const supabase = getSupabaseClient();
-  if (!supabase) return [];
-
-  try {
-    const { data: shops, error } = await supabase.from('shops').select('*');
-    if (error || !shops) return [];
-
-    const { data: allProducts } = await supabase.from('products').select('*');
-    const { data: allDBCategories } = await supabase.from('categories').select('*').order('sort_order', { ascending: true });
-
-    return shops.map(shopRecord => {
-      const shopProducts = (allProducts || []).filter(p => p.shop_id === shopRecord.id);
-
-      let tagList = [];
-      if (shopRecord.slug === 'yesfancy') {
-        tagList = ORIGINAL_YESFANCY_CATEGORIES;
-      } else {
-        const shopDBCats = (allDBCategories || []).filter(c => c.shop_id === shopRecord.id);
-        if (shopDBCats.length > 0) {
-          tagList = shopDBCats.map(c => ({
-            id: c.id,
-            label: c.label,
-            sort_order: c.sort_order
-          }));
-        } else {
-          const categoryMap = new Map<string, string>();
-          categoryMap.set('all', 'All Products');
-          shopProducts.forEach((p: any) => {
-            if (p.category_id && p.category_id !== 'all') {
-              categoryMap.set(p.category_id, formatTagLabel(p.category_id));
-            }
-          });
-          tagList = Array.from(categoryMap.entries()).map(([id, label], index) => ({
-            id,
-            label,
-            sort_order: index
-          }));
-        }
-      }
-
-      const themeObj = shopRecord.theme || {};
-
-      return {
-        id: shopRecord.id,
-        slug: shopRecord.slug,
-        name: shopRecord.name,
-        tagline: shopRecord.tagline,
-        category: shopRecord.category,
-        template: shopRecord.template_key || 'gift_shop_template_1',
-        phone: shopRecord.phone,
-        announcement_text: shopRecord.announcement_text || 'FREE SHIPPING ON ORDERS ABOVE ₹999 | EXPRESS STORE PICKUP',
-        logo_url: shopRecord.logo_url || '/images/yes_fancy_icon_transparent.png',
-        logo_animated_url: shopRecord.logo_animated_url || '/images/yes_fancy_icon_animated.gif',
-        logo_text: shopRecord.logo_text || shopRecord.name,
-        features_ticker: shopRecord.features_ticker || [
-          { label: "Easy Return", icon: "return" },
-          { label: "Quality Assured", icon: "quality" },
-          { label: "Satisfied Customers", icon: "heart" },
-          { label: "Express Dispatch", icon: "dispatch" }
-        ],
-        hero_slides: (shopRecord.hero_slides && shopRecord.hero_slides.length > 0) ? shopRecord.hero_slides : defaultOfferSlides,
-        theme: {
-          primary_color: themeObj.primary_color || '#581C87',
-          secondary_color: themeObj.secondary_color || '#D4AF37',
-          accent_color: themeObj.accent_color || '#E11D48',
-          font_title: themeObj.font_title || 'Plus Jakarta Sans',
-          font_body: themeObj.font_body || 'Plus Jakarta Sans'
-        },
-        tags: tagList,
-        categories: tagList,
-        products: shopProducts.map((p: any) => ({
-          ...p,
-          image_url: p.image_url || ''
-        })),
-        carousels: {
-          hero: (shopRecord.hero_slides && shopRecord.hero_slides.length > 0) ? shopRecord.hero_slides : defaultOfferSlides
-        }
-      };
-    });
-  } catch (e) {
-    console.error('Error fetching all shops:', e);
-    return [];
-  }
+  const store = await getStoreConfigAsync();
+  return store ? [store] : [];
 }

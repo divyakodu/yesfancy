@@ -35,7 +35,7 @@ const activeProducts = (products || []).filter((p: any) => p.is_active !== false
         <h2 class="text-xl sm:text-2xl font-serif-title font-extrabold text-slate-900 uppercase tracking-wide">
           {(c.label || '').replace(/^[^\w\s]+\s*/, '')}
         </h2>
-        <a href={`/catalog?shop=${shopSlug}&category=${c.tag || c.id}`} class="text-xs font-bold text-slate-900 uppercase tracking-wider hover:underline no-underline">
+        <a href={`/catalog?category=${c.tag || c.id}`} class="text-xs font-bold text-slate-900 uppercase tracking-wider hover:underline no-underline">
           VIEW COLLECTION ➔
         </a>
       </div>

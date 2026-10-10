@@ -3,15 +3,12 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { supabase, isSupabaseConfigured } from '@lib/supabase';
 
-export const GET: APIRoute = async ({ url }) => {
-  const shopSlug = url.searchParams.get('shop') || url.searchParams.get('shop_id') || 'yesfancy';
-
+export const GET: APIRoute = async () => {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data: orders, error } = await supabase
         .from('orders')
         .select('*')
-        .or(`shop_slug.eq.${shopSlug},shop_slug.eq.yesfancy`)
         .order('created_at', { ascending: false });
 
       if (!error && orders) {
@@ -26,38 +23,34 @@ export const GET: APIRoute = async ({ url }) => {
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { order_id, shop_slug = 'yesfancy', customer_name, phone, address, items, total } = body;
+    const { order_id, customer_name, phone, address, items, total, status } = body;
+
+    const generatedOrderId = order_id || `YF-${Date.now().toString(36).toUpperCase()}`;
 
     if (isSupabaseConfigured && supabase) {
-      const { data: shopRecord } = await supabase
-        .from('shops')
-        .select('id')
-        .eq('slug', shop_slug)
+      const { data, error } = await supabase
+        .from('orders')
+        .upsert({
+          order_id: generatedOrderId,
+          customer_name: customer_name || 'Valued Customer',
+          phone: phone || '',
+          address: address || '',
+          items: items || [],
+          total: Number(total || 0),
+          status: status || 'Order Placed & Processing'
+        }, { onConflict: 'order_id' })
+        .select()
         .single();
 
-      if (shopRecord) {
-        const { data, error } = await supabase
-          .from('orders')
-          .upsert({
-            order_id,
-            shop_id: shopRecord.id,
-            shop_slug,
-            customer_name,
-            phone,
-            address,
-            items,
-            total,
-            status: 'Order Placed & Processing'
-          }, { onConflict: 'order_id' })
-          .select()
-          .single();
-
-        if (!error) {
-          return new Response(JSON.stringify({ success: true, order: data }), { status: 200 });
-        }
+      if (!error) {
+        return new Response(JSON.stringify({ success: true, order: data }), { status: 200 });
+      } else {
+        return new Response(JSON.stringify({ error: error.message }), { status: 400 });
       }
     }
-  } catch (e) {}
 
-  return new Response(JSON.stringify({ success: true }), { status: 200 });
+    return new Response(JSON.stringify({ success: true, order: { order_id: generatedOrderId } }), { status: 200 });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+  }
 };

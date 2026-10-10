@@ -2,70 +2,55 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { supabase, isSupabaseConfigured } from '@lib/supabase';
-import { uploadTenantAsset } from '@lib/storage';
+import { uploadAsset } from '@lib/storage';
 
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
     const { 
-      slug, 
       name,
-      template_key, 
       phone, 
       announcement_text, 
       tagline,
       logo_url,
+      logo_text,
       primary_color, 
       secondary_color, 
       accent_color,
       font_title,
-      font_body 
+      font_body,
+      features_ticker
     } = body;
-
-    if (!slug) {
-      return new Response(JSON.stringify({ error: 'Missing shop slug' }), { status: 400 });
-    }
 
     let publicLogoUrl = logo_url;
     if (logo_url && logo_url.startsWith('data:image')) {
-      publicLogoUrl = await uploadTenantAsset(slug, 'banners', logo_url, `logo_${Date.now()}`);
+      publicLogoUrl = await uploadAsset('banners', logo_url, `logo_${Date.now()}`);
     }
 
     if (isSupabaseConfigured && supabase) {
-      // 1. Update Shop record
-      const updatePayload: any = {
-        template_key,
-        phone,
-        announcement_text,
-        tagline
+      const updatePayload: Record<string, any> = {
+        id: 'default',
+        updated_at: new Date().toISOString()
       };
       if (name) updatePayload.name = name;
+      if (phone) updatePayload.phone = phone;
+      if (announcement_text) updatePayload.announcement_text = announcement_text;
+      if (tagline) updatePayload.tagline = tagline;
+      if (publicLogoUrl) updatePayload.logo_url = publicLogoUrl;
+      if (logo_text) updatePayload.logo_text = logo_text;
+      if (primary_color) updatePayload.primary_color = primary_color;
+      if (secondary_color) updatePayload.secondary_color = secondary_color;
+      if (accent_color) updatePayload.accent_color = accent_color;
+      if (font_title) updatePayload.font_title = font_title;
+      if (font_body) updatePayload.font_body = font_body;
+      if (features_ticker) updatePayload.features_ticker = features_ticker;
 
-      const { data: shopRecord, error: shopError } = await supabase
-        .from('shops')
-        .update(updatePayload)
-        .eq('slug', slug)
-        .select()
-        .single();
+      const { error } = await supabase
+        .from('store_settings')
+        .upsert(updatePayload, { onConflict: 'id' });
 
-      if (shopError || !shopRecord) {
-        return new Response(JSON.stringify({ error: shopError?.message }), { status: 400 });
-      }
-
-      // 2. Update or Insert Shop Theme
-      const { error: themeError } = await supabase
-        .from('shop_themes')
-        .upsert({
-          shop_id: shopRecord.id,
-          primary_color: primary_color || '#00A896',
-          secondary_color: secondary_color || '#F4F4F9',
-          accent_color: accent_color || '#E63946',
-          font_title: font_title || 'Playfair Display',
-          font_body: font_body || 'Montserrat'
-        }, { onConflict: 'shop_id' });
-
-      if (themeError) {
-        return new Response(JSON.stringify({ error: themeError.message }), { status: 400 });
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 400 });
       }
 
       return new Response(JSON.stringify({ success: true }), { status: 200 });

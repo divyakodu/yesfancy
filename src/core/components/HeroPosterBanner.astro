@@ -42,7 +42,8 @@ const shopSlug = shop?.slug || 'yesfancy';
 <div id="hero-banner-container" class="relative w-full overflow-hidden bg-slate-950 text-white min-h-[480px] sm:min-h-[580px] md:min-h-[640px] lg:min-h-[700px] flex items-center shadow-xl select-none">
   {slides.map((slide, idx) => {
     const slideTag = slide.tag_id || 'all';
-    const slideLink = slide.link || `/catalog?shop=${shopSlug}&tag=${slideTag}`;
+    let slideLink = slide.link || `/catalog?category=${slideTag}`;
+    slideLink = slideLink.replace(/[?&]shop=[^&]+&?/, '?').replace(/\?$/, '');
 
     return (
       <div 

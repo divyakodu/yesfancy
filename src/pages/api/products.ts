@@ -2,23 +2,23 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { supabase, isSupabaseConfigured } from '@lib/supabase';
-import { uploadTenantAsset } from '@lib/storage';
+import { uploadAsset } from '@lib/storage';
 
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { shop_slug, id, name, price, discount, mrp, category_id, badge, tags, image_url, stock } = body;
+    const { id, name, price, discount, mrp, category_id, badge, tags, image_url, stock, is_active } = body;
 
-    if (!shop_slug) {
-      return new Response(JSON.stringify({ error: 'Missing shop_slug' }), { status: 400 });
+    if (!name) {
+      return new Response(JSON.stringify({ error: 'Missing product name' }), { status: 400 });
     }
 
     const prodId = id || `prod_${Date.now()}`;
 
-    // Upload photo to Supabase Storage isolated under product-images/{shop_slug}/products/
+    // Upload photo to Supabase Storage isolated under product-images/yesfancy/products/
     let publicCloudUrl = image_url;
     if (image_url && image_url.startsWith('data:image')) {
-      publicCloudUrl = await uploadTenantAsset(shop_slug, 'products', image_url, prodId);
+      publicCloudUrl = await uploadAsset('products', image_url, prodId);
     }
 
     const stockQty = stock !== undefined ? Number(stock) : 100;
@@ -27,36 +27,27 @@ export const POST: APIRoute = async ({ request }) => {
     const finalPrice = Math.round(finalMrp * (1 - finalDiscount / 100));
 
     if (isSupabaseConfigured && supabase) {
-      const { data: shopRecord } = await supabase
-        .from('shops')
-        .select('id')
-        .eq('slug', shop_slug)
-        .single();
+      const { error } = await supabase
+        .from('products')
+        .upsert({
+          id: prodId,
+          category_id: category_id || 'all',
+          name,
+          discount: finalDiscount,
+          price: finalPrice,
+          mrp: finalMrp,
+          image_url: publicCloudUrl,
+          badge: badge || null,
+          tags: Array.isArray(tags) ? tags : [category_id || 'all'],
+          stock: stockQty,
+          is_active: is_active !== undefined ? Boolean(is_active) : true
+        }, { onConflict: 'id' });
 
-      if (shopRecord) {
-        const { error } = await supabase
-          .from('products')
-          .upsert({
-            id: prodId,
-            shop_id: shopRecord.id,
-            category_id,
-            name,
-            discount: finalDiscount,
-            price: finalPrice,
-            mrp: finalMrp,
-            image_url: publicCloudUrl,
-            badge: badge || null,
-            tags: Array.isArray(tags) ? tags : [category_id],
-            stock: stockQty,
-            is_active: true
-          }, { onConflict: 'id,shop_id' });
-
-        if (!error) {
-          return new Response(JSON.stringify({ success: true, id: prodId, image_url: publicCloudUrl, stock: stockQty }), { status: 200 });
-        } else {
-          return new Response(JSON.stringify({ error: error.message }), { status: 400 });
-        }
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 400 });
       }
+
+      return new Response(JSON.stringify({ success: true, id: prodId, image_url: publicCloudUrl, stock: stockQty }), { status: 200 });
     }
 
     return new Response(JSON.stringify({ success: true, id: prodId, image_url: publicCloudUrl, stock: stockQty }), { status: 200 });
@@ -69,7 +60,6 @@ export const DELETE: APIRoute = async ({ request }) => {
   try {
     const url = new URL(request.url);
     let ids: string[] = [];
-    let shop_slug = url.searchParams.get('shop');
 
     const queryId = url.searchParams.get('id');
     const queryIds = url.searchParams.get('ids');
@@ -81,31 +71,21 @@ export const DELETE: APIRoute = async ({ request }) => {
         const body = await request.json();
         if (body.ids && Array.isArray(body.ids)) ids = body.ids;
         else if (body.id) ids = [body.id];
-        if (body.shop_slug) shop_slug = body.shop_slug;
       } catch (e) {}
     }
 
-    if (ids.length === 0 || !shop_slug) {
-      return new Response(JSON.stringify({ error: 'Missing product ids or shop parameter' }), { status: 400 });
+    if (ids.length === 0) {
+      return new Response(JSON.stringify({ error: 'Missing product ids' }), { status: 400 });
     }
 
     if (isSupabaseConfigured && supabase) {
-      const { data: shopRecord } = await supabase
-        .from('shops')
-        .select('id')
-        .eq('slug', shop_slug)
-        .single();
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .in('id', ids);
 
-      if (shopRecord) {
-        const { error } = await supabase
-          .from('products')
-          .delete()
-          .in('id', ids)
-          .eq('shop_id', shopRecord.id);
-
-        if (error) {
-          return new Response(JSON.stringify({ error: error.message }), { status: 400 });
-        }
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 400 });
       }
     }
 
@@ -118,11 +98,11 @@ export const DELETE: APIRoute = async ({ request }) => {
 export const PATCH: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { shop_slug, id, ids, is_active, stock } = body;
+    const { id, ids, is_active, stock } = body;
     const targetIds = Array.isArray(ids) ? ids : (id ? [id] : []);
 
-    if (targetIds.length === 0 || !shop_slug) {
-      return new Response(JSON.stringify({ error: 'Missing required parameters' }), { status: 400 });
+    if (targetIds.length === 0) {
+      return new Response(JSON.stringify({ error: 'Missing product id(s)' }), { status: 400 });
     }
 
     const updates: Record<string, any> = {};
@@ -130,22 +110,13 @@ export const PATCH: APIRoute = async ({ request }) => {
     if (stock !== undefined) updates.stock = Number(stock);
 
     if (isSupabaseConfigured && supabase) {
-      const { data: shopRecord } = await supabase
-        .from('shops')
-        .select('id')
-        .eq('slug', shop_slug)
-        .single();
+      const { error } = await supabase
+        .from('products')
+        .update(updates)
+        .in('id', targetIds);
 
-      if (shopRecord) {
-        const { error } = await supabase
-          .from('products')
-          .update(updates)
-          .in('id', targetIds)
-          .eq('shop_id', shopRecord.id);
-
-        if (error) {
-          return new Response(JSON.stringify({ error: error.message }), { status: 400 });
-        }
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 400 });
       }
     }
 
@@ -154,4 +125,3 @@ export const PATCH: APIRoute = async ({ request }) => {
     return new Response(JSON.stringify({ error: e.message }), { status: 500 });
   }
 };
-

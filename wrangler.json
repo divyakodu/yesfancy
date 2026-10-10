@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "oorumart",
+	"name": "yesfancy",
 	"compatibility_date": "2026-08-29",
 	"compatibility_flags": [
 		"nodejs_compat"

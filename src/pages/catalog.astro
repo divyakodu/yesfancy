@@ -5,42 +5,30 @@ import '@styles/global.css';
 import ProductCard from '@components/ProductCard.astro';
 import StoreHeader from '@components/StoreHeader.astro';
 import StoreFooter from '@components/StoreFooter.astro';
-import { getShopConfigAsync, getAllShopsConfigAsync } from '@lib/getShopConfig';
+import { getStoreConfigAsync } from '@lib/getShopConfig';
 
-// Prevent serving stale deleted/hidden product lists from browser or CDN cache
+// Prevent serving stale product lists from browser or CDN cache
 Astro.response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
 Astro.response.headers.set('Pragma', 'no-cache');
 Astro.response.headers.set('Expires', '0');
 
 const url = new URL(Astro.request.url);
-const host = Astro.request.headers.get('host') || '';
-const queryShop = url.searchParams.get('shop');
 const tagOrCategoryFilter = url.searchParams.get('tag') || url.searchParams.get('category') || 'all';
 const categoryFilter = tagOrCategoryFilter;
 const searchQuery = (url.searchParams.get('search') || url.searchParams.get('q') || '').trim();
 
-const hostParts = host.split(':')[0].split('.');
-const subdomain = (hostParts.length > 2 && hostParts[0] !== 'www') ? hostParts[0] : null;
+// Fetch direct single-store config
+const shop = await getStoreConfigAsync();
 
-const defaultShopEnv = (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.DEFAULT_SHOP : null) || process.env.DEFAULT_SHOP;
-const targetSlug = queryShop || subdomain || defaultShopEnv || 'yesfancy';
+if (!shop) {
+  throw new Error('Failed to load store configuration from database.');
+}
 
-// Fetch all shops and single tenant shop
-const allShops = await getAllShopsConfigAsync();
-const shopData = targetSlug ? await getShopConfigAsync(targetSlug) : null;
-const shop = shopData?.shop || null;
-
-const isGlobalCatalog = !targetSlug;
-const isShopNotFound = Boolean(targetSlug && !shop);
-
-// For global catalog, flatten active products across all shops
-const globalProducts = allShops.flatMap(s => (s.products || []).filter((p: any) => p.is_active !== false).map(p => ({ ...p, shopName: s.name, shopSlug: s.slug })));
-
-const { products: rawProducts = [], categories = [], theme } = shop || {};
+const { products: rawProducts = [], categories = [], theme } = shop;
 const products = (rawProducts || []).filter((p: any) => p.is_active !== false);
 const primaryColor = theme?.primary_color || '#581C87';
 
-// Flexible Keyword & Semantic Relevance Scoring Algorithm
+// Keyword & Semantic Relevance Scoring Algorithm
 function computeRelevanceScore(product: any, queryStr: string): number {
   if (!queryStr) return 1;
   const q = queryStr.toLowerCase().trim();
@@ -54,102 +42,96 @@ function computeRelevanceScore(product: any, queryStr: string): number {
 
   let score = 0;
 
-  // 1. Full Multi-Word Phrase Matches
   if (name === q) score += 100;
   else if (name.startsWith(q)) score += 60;
   else if (name.includes(q)) score += 40;
-  else if (tagsStr.includes(q)) score += 30;
-  else if (desc.includes(q)) score += 20;
 
-  // 2. Keyword Token Matches with Stemming (Plural/Singular: "sets" -> "set", "gifts" -> "gift")
-  let matchedTokenCount = 0;
+  if (tags.includes(q)) score += 50;
+  else if (tagsStr.includes(q)) score += 25;
+
+  if (category === q) score += 30;
+
+  const nameWords = name.split(/\s+/).filter(Boolean);
+  let matchedTokens = 0;
+
   for (const token of rawTokens) {
-    const stem = (token.length > 3 && token.endsWith('s')) ? token.slice(0, -1) : token;
-    let tokenMatched = false;
+    if (token.length < 2) continue;
 
-    if (name.includes(token) || name.includes(stem)) {
-      score += 15;
+    let tokenMatched = false;
+    if (nameWords.some((w: string) => w === token || w.startsWith(token))) {
+      score += 20;
       tokenMatched = true;
-    }
-    if (tagsStr.includes(token) || tagsStr.includes(stem)) {
+    } else if (name.includes(token)) {
       score += 10;
       tokenMatched = true;
     }
-    if (category.includes(token) || category.includes(stem)) {
-      score += 8;
+
+    if (tags.some((t: string) => t === token || t.startsWith(token))) {
+      score += 15;
       tokenMatched = true;
     }
-    if (desc.includes(token) || desc.includes(stem)) {
+
+    if (category.includes(token)) {
+      score += 10;
+      tokenMatched = true;
+    }
+
+    if (desc.includes(token)) {
       score += 5;
       tokenMatched = true;
     }
 
-    if (tokenMatched) {
-      matchedTokenCount++;
-    }
+    if (tokenMatched) matchedTokens++;
   }
 
-  // Bonus when product matches all tokens in multi-word search query
-  if (rawTokens.length > 1 && matchedTokenCount === rawTokens.length) {
-    score += 50;
+  if (rawTokens.length > 1 && matchedTokens === rawTokens.length) {
+    score += 35;
   }
 
-  // Include product if at least 1 keyword token matched
-  return matchedTokenCount > 0 ? score : 0;
+  return score;
 }
 
-const filterProductFn = (p: any) => {
-  if (tagOrCategoryFilter !== 'all') {
-    const matchesCategory = p.category_id === tagOrCategoryFilter;
-    const matchesTag = Array.isArray(p.tags) 
-      ? p.tags.includes(tagOrCategoryFilter)
-      : (typeof p.tags === 'string' ? p.tags.split(',').map((t: string) => t.trim().toLowerCase()).includes(tagOrCategoryFilter) : false);
-    if (!matchesCategory && !matchesTag) return false;
-  }
-
-  if (searchQuery) {
-    const score = computeRelevanceScore(p, searchQuery);
-    p._relevanceScore = score;
-    return score > 0;
-  }
-
-  return true;
-};
-
-let matchedProductsList = isGlobalCatalog 
-  ? globalProducts.filter(filterProductFn)
-  : products.filter(filterProductFn);
+let scoredProducts = products.map((p: any) => {
+  const score = searchQuery ? computeRelevanceScore(p, searchQuery) : 1;
+  return { ...p, _score: score };
+});
 
 if (searchQuery) {
-  matchedProductsList.sort((a: any, b: any) => (b._relevanceScore || 0) - (a._relevanceScore || 0));
+  scoredProducts = scoredProducts.filter((p: any) => p._score > 0);
+  scoredProducts.sort((a: any, b: any) => b._score - a._score);
 }
 
-const initialProducts = matchedProductsList;
+const initialProducts = scoredProducts.filter((p: any) => {
+  if (categoryFilter === 'all') return true;
+  if (p.category_id === categoryFilter) return true;
+  if (Array.isArray(p.tags) && p.tags.includes(categoryFilter)) return true;
+  return false;
+});
 
+// Server-side pagination calculation
 const PAGE_SIZE = 16;
-const currentPageParam = parseInt(url.searchParams.get('page') || '1', 10);
-const currentPage = Math.max(1, isNaN(currentPageParam) ? 1 : currentPageParam);
-
+const requestedPage = parseInt(url.searchParams.get('page') || '1', 10);
+const currentPage = isNaN(requestedPage) || requestedPage < 1 ? 1 : requestedPage;
 const totalMatching = initialProducts.length;
 const totalPages = Math.max(1, Math.ceil(totalMatching / PAGE_SIZE));
-const startIndex = (currentPage - 1) * PAGE_SIZE;
+const safePage = Math.min(currentPage, totalPages);
+const startIndex = (safePage - 1) * PAGE_SIZE;
 const endIndex = Math.min(startIndex + PAGE_SIZE, totalMatching);
 const paginatedProducts = initialProducts.slice(startIndex, endIndex);
 
-function getPaginationRange(current: number, total: number): (number | string)[] {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
-  }
-  if (current <= 4) {
-    return [1, 2, 3, 4, 5, '...', total];
-  }
-  if (current >= total - 3) {
-    return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
-  }
-  return [1, '...', current - 1, current, current + 1, '...', total];
+// Build smart pagination range (window around current page)
+const paginationRange: (number | string)[] = [];
+if (totalPages <= 7) {
+  for (let i = 1; i <= totalPages; i++) paginationRange.push(i);
+} else {
+  paginationRange.push(1);
+  if (safePage > 3) paginationRange.push('...');
+  const start = Math.max(2, safePage - 1);
+  const end = Math.min(totalPages - 1, safePage + 1);
+  for (let i = start; i <= end; i++) paginationRange.push(i);
+  if (safePage < totalPages - 2) paginationRange.push('...');
+  paginationRange.push(totalPages);
 }
-
-const paginationRange = getPaginationRange(currentPage, totalPages);
 ---
 
 <!DOCTYPE html>
@@ -157,822 +139,617 @@ const paginationRange = getPaginationRange(currentPage, totalPages);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{isGlobalCatalog ? 'Oorumart Marketplace | Global Product Catalog' : isShopNotFound ? 'Store Not Found | Oorumart' : `${shop.name} | Catalog & Collection`}</title>
+  <title>All Products & Catalog | {shop.name}</title>
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <style define:vars={{ primaryColor }}>
     * { box-sizing: border-box; }
     .badge-dark {
-      background-color: #0F172A;
+      background-color: #1D2228;
       color: #FFFFFF;
     }
     .add-btn {
-      background-color: #FFFFFF;
-      color: #0F172A;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15);
-    }
-    .add-btn:hover {
-      background-color: #0F172A;
+      background-color: var(--primaryColor);
       color: #FFFFFF;
     }
-    .footer-art-bg {
-      background-color: var(--primaryColor);
+    .add-btn:hover {
+      opacity: 0.9;
     }
-    .no-scrollbar::-webkit-scrollbar { display: none; }
   </style>
 </head>
-<body class="min-h-screen text-slate-800 bg-white relative pb-16 sm:pb-0">
+<body class="bg-slate-50 text-slate-900 antialiased min-h-screen flex flex-col">
 
-  {/* ================================================================= */}
-  {/* STATE 1: OORUMART GLOBAL MARKETPLACE CATALOG (No ?shop Param)    */}
-  {/* ================================================================= */}
-  {isGlobalCatalog && (
-    <div class="min-h-screen bg-slate-50">
-      
-      <!-- Top Platform Bar -->
-      <div class="bg-slate-900 text-slate-200 text-xs font-semibold py-2 px-6 flex items-center justify-between">
-        <a href="/" class="hover:text-white no-underline font-bold text-rose-400">🌐 Back to Oorumart Marketplace Directory</a>
-        <span>Browsing Products Across All Verified Merchants</span>
+  <div class="min-h-screen flex flex-col">
+    <!-- Store Header Component -->
+    <StoreHeader shop={shop} primaryColor={primaryColor} />
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 flex-1 w-full">
+      <div class="text-center">
+        <h1 id="catalog-header-title" class="font-serif-title text-2xl sm:text-3xl font-bold tracking-wider uppercase text-slate-900">
+          {searchQuery ? `SEARCH RESULTS FOR "${searchQuery.toUpperCase()}"` : (categories.find((c: any) => c.id === categoryFilter)?.label || 'CATALOG & COLLECTION')}
+        </h1>
+        <p id="catalog-header-sub" class="text-xs text-slate-500 mt-1">
+          {searchQuery ? `Showing ${initialProducts.length} matching products for "${searchQuery}"` : `Browse all curated products from ${shop.name}`}
+        </p>
       </div>
 
-      <header class="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-4 shadow-xs">
-        <div class="max-w-7xl mx-auto flex items-center justify-between">
-          <a href="/" class="flex items-center space-x-2 no-underline">
-            <span class="font-extrabold text-2xl tracking-widest text-slate-900 font-serif-title uppercase">OORUMART CATALOG</span>
-          </a>
-
-          <!-- Filter by Shop Pills -->
-          <div class="flex items-center space-x-2 text-xs font-bold">
-            <span class="text-slate-400 hidden sm:inline">Filter by Store:</span>
-            <a href="/catalog" class="bg-slate-900 text-white px-2.5 py-1 rounded no-underline">All Stores</a>
-            {allShops.map((s: any) => (
-              <a href={`/catalog?shop=${s.slug}`} class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded no-underline">
-                {s.name}
-              </a>
-            ))}
-          </div>
-        </div>
-      </header>
-
-      <main class="max-w-7xl mx-auto px-6 py-8 space-y-6">
-        <div class="text-center space-y-2">
-          <h1 class="font-serif-title text-3xl font-extrabold uppercase text-slate-900">
-            {searchQuery ? `SEARCH RESULTS FOR "${searchQuery.toUpperCase()}"` : 'GLOBAL PRODUCT COLLECTION'}
-          </h1>
-          <p class="text-xs text-slate-500">
-            {searchQuery ? `Showing ${initialProducts.length} matching products for "${searchQuery}"` : `Explore ${initialProducts.length} items from hyperlocal merchants on Oorumart`}
-          </p>
-        </div>
-
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
-          {initialProducts.map((product: any) => (
-            <div class="bg-white border border-slate-200 rounded-xl overflow-hidden group hover:border-slate-800 transition-all flex flex-col justify-between shadow-xs">
-              <div>
-                <div class="relative aspect-square overflow-hidden bg-slate-100">
-                  <a href={`/product/${product.id}?shop=${product.shopSlug}`}>
-                    <img src={product.image_url} alt={product.name} class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  </a>
-                  <span class="absolute top-2 left-2 bg-slate-900 text-white text-[9px] font-bold uppercase px-2 py-0.5 rounded">
-                    {product.shopName}
-                  </span>
-                </div>
-                <div class="p-3 space-y-1">
-                  <a href={`/product/${product.id}?shop=${product.shopSlug}`} class="no-underline">
-                    <h3 class="text-xs font-semibold text-slate-900 line-clamp-2 hover:text-rose-600">{product.name}</h3>
-                  </a>
-                  <div class="text-xs font-bold text-rose-600">₹ {product.price}</div>
-                </div>
-              </div>
-              <div class="p-3 pt-0">
-                <a href={`/product/${product.id}?shop=${product.shopSlug}`} class="block text-center w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] uppercase tracking-wider rounded no-underline">
-                  Visit Store Page
-                </a>
-              </div>
-            </div>
-          ))}
-        </div>
-      </main>
-    </div>
-  )}
-
-  {/* ================================================================= */}
-  {/* STATE 2: SHOP NOT FOUND                                           */}
-  {/* ================================================================= */}
-  {isShopNotFound && (
-    <div class="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <div class="max-w-md w-full bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-6 shadow-xl">
-        <div class="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-3xl mx-auto font-bold">
-          ⚠️
-        </div>
-        <div class="space-y-2">
-          <h1 class="font-serif-title text-2xl font-bold text-slate-900 uppercase">Shop Not Found</h1>
-          <p class="text-xs text-slate-500">The requested shop is not registered on Oorumart.</p>
-        </div>
-
-        <a href="/catalog" class="inline-block px-6 py-3 bg-slate-900 text-white font-extrabold text-xs uppercase tracking-wider rounded-lg no-underline hover:bg-slate-800 transition-colors shadow-md">
-          Explore Global Catalog ➔
-        </a>
-      </div>
-    </div>
-  )}
-
-  {/* ================================================================= */}
-  {/* STATE 3: SINGLE TENANT CATALOG (e.g. ?shop=sarveshpan)            */}
-  {/* ================================================================= */}
-  {!isGlobalCatalog && !isShopNotFound && (
-    <div>
-      <!-- Tenant Switcher & Debug Bar -->
-      <div class="bg-slate-900 text-slate-200 text-[11px] font-medium py-1 px-4 flex items-center justify-between border-b border-slate-800 select-none">
-        <div class="flex items-center space-x-2">
-          <span class="bg-emerald-500 w-2 h-2 rounded-full animate-pulse"></span>
-          <span>Storefront | <strong class="text-white uppercase">{shop.name}</strong></span>
-        </div>
-        <div class="flex items-center space-x-3 text-slate-300">
-          <a href={`/catalog?shop=${shop.slug}`} class="hover:text-white no-underline text-purple-300 font-bold">🛍️ View Full Catalog</a>
-          <button onclick="clearFullCart(); alert('Cart has been reset to 0 items!');" class="hover:text-rose-300 text-rose-400 font-bold cursor-pointer bg-transparent border-0">🗑️ Reset Cart</button>
-          <a href={`/?shop=${shop.slug}`} class="hover:text-white no-underline text-slate-300 font-bold">🏠 Store Home</a>
-        </div>
-      </div>
-
-      <!-- 100% Generic Reusable Store Header Component -->
-      <StoreHeader shop={shop} primaryColor={primaryColor} />
-
-      <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        <div class="text-center">
-          <h1 id="catalog-header-title" class="font-serif-title text-2xl sm:text-3xl font-bold tracking-wider uppercase text-slate-900">
-            {searchQuery ? `SEARCH RESULTS FOR "${searchQuery.toUpperCase()}"` : (categories.find((c: any) => c.id === categoryFilter)?.label || 'CATALOG & COLLECTION')}
-          </h1>
-          <p id="catalog-header-sub" class="text-xs text-slate-500 mt-1">
-            {searchQuery ? `Showing ${initialProducts.length} matching products for "${searchQuery}"` : `Browse all curated products from ${shop.name}`}
-          </p>
-        </div>
-
-        <!-- Catalog Toolbar -->
-        <div class="border-y border-slate-200 bg-white px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 select-none">
-          <!-- Left: Layout Grid View Toggles -->
-          <div class="flex items-center space-x-2 border-r border-slate-200 pr-3 sm:pr-4">
-            <button onclick="setCatalogColumns(2)" class="p-1 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-900 cursor-pointer" title="2 Grid View">
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zm-9 9h7v7H4v-7zm9 0h7v7h-7v-7z"/></svg>
-            </button>
-            <button onclick="setCatalogColumns(4)" class="p-1 hover:bg-slate-100 rounded text-slate-900 cursor-pointer" title="4 Grid View">
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h4v4H3V3zm7 0h4v4h-4V3zm7 0h4v4h-4V3zM3 10h4v4H3v-4zm7 0h4v4h-4v-4zm7 0h4v4h-4v-4zM3 17h4v4H3v-4zm7 0h4v4h-4v-4zm7 0h4v4h-4v-4z"/></svg>
-            </button>
-          </div>
-
-          <!-- Center: Product Count -->
-          <div id="catalog-product-count" class="font-medium text-slate-500 text-xs tracking-wide">
-            {initialProducts.length} products
-          </div>
-
-          <!-- Right: Category, Price, Sort By & Reset (Separated by Vertical Dividers) -->
-          <div class="flex flex-wrap items-center border-l border-slate-200 pl-2 sm:pl-4 space-x-1 sm:space-x-3 font-medium">
-            <!-- Category Filter -->
-            <div class="flex items-center border-r border-slate-200 pr-1 sm:pr-3">
-              <select id="catalog-category-select" onchange="applyFiltersAndSort()" class="bg-transparent text-slate-700 hover:text-slate-900 font-semibold text-xs py-1 px-1.5 focus:outline-none cursor-pointer border-0">
-                <option value="all">Category: All</option>
-                {categories.map((c: any) => (
-                  <option value={c.id} selected={categoryFilter === c.id}>{c.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <!-- Price Range Filter -->
-            <div class="flex items-center border-r border-slate-200 pr-1 sm:pr-3">
-              <select id="catalog-price-select" onchange="applyFiltersAndSort()" class="bg-transparent text-slate-700 hover:text-slate-900 font-semibold text-xs py-1 px-1.5 focus:outline-none cursor-pointer border-0">
-                <option value="all">Price: All</option>
-                <option value="under_300">Under ₹ 300</option>
-                <option value="300_700">₹ 300 - ₹ 700</option>
-                <option value="700_1500">₹ 700 - ₹ 1500</option>
-                <option value="above_1500">Above ₹ 1500</option>
-              </select>
-            </div>
-
-            <!-- Sort By Dropdown -->
-            <div class="flex items-center border-r border-slate-200 pr-1 sm:pr-3">
-              <select id="catalog-sort-select" onchange="applyFiltersAndSort()" class="bg-transparent text-slate-700 hover:text-slate-900 font-semibold text-xs py-1 px-1.5 focus:outline-none cursor-pointer border-0">
-                <option value="featured">Sort by: Featured</option>
-                <option value="price_low_high">Price: Low to High</option>
-                <option value="price_high_low">Price: High to Low</option>
-                <option value="name_asc">Alphabetical: A to Z</option>
-                <option value="name_desc">Alphabetical: Z to A</option>
-              </select>
-            </div>
-
-            <!-- Reset Button -->
-            <button onclick="resetFilters()" class="text-slate-500 hover:text-rose-600 font-semibold text-xs cursor-pointer transition-colors bg-transparent border-0 px-2 py-1">
-              Reset
-            </button>
-          </div>
-        </div>
-
-        <div id="catalog-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-          {paginatedProducts.map((product: any) => (
-            <ProductCard product={product} shopSlug={shop.slug} />
-          ))}
-        </div>
-
-        <!-- Pagination Controls Bar -->
-        <div id="pagination-controls" class="mt-10 pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div id="pagination-summary" class="text-xs font-semibold text-slate-500">
-            Showing <span id="pag-start-count">{totalMatching > 0 ? startIndex + 1 : 0}</span> to <span id="pag-end-count">{endIndex}</span> of <span id="pag-total-count">{totalMatching}</span> products
-          </div>
-
-          <div id="pagination-buttons" class="flex flex-wrap items-center justify-center gap-1.5 select-none">
-            <!-- Prev Button -->
-            <a 
-              href={currentPage > 1 ? `?shop=${targetSlug || ''}&tag=${tagOrCategoryFilter}&page=${currentPage - 1}` : '#'} 
-              class={`px-3 py-2 text-xs font-bold rounded border no-underline ${currentPage > 1 ? 'border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 cursor-pointer' : 'border-slate-200 text-slate-300 pointer-events-none opacity-50'}`}
-            >
-              ⬅ Prev
-            </a>
-
-            <!-- Page Number Links -->
-            {paginationRange.map((item) => (
-              typeof item === 'number' ? (
-                <a 
-                  href={`?shop=${targetSlug || ''}&tag=${tagOrCategoryFilter}&search=${encodeURIComponent(searchQuery)}&page=${item}`}
-                  class={`px-3 py-2 text-xs font-bold rounded border no-underline ${item === currentPage ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
-                >
-                  {item}
-                </a>
-              ) : (
-                <span class="px-2 py-2 text-xs font-bold text-slate-400 select-none">...</span>
-              )
-            ))}
-
-            <!-- Next Button -->
-            <a 
-              href={currentPage < totalPages ? `?shop=${targetSlug || ''}&tag=${tagOrCategoryFilter}&page=${currentPage + 1}` : '#'} 
-              class={`px-3 py-2 text-xs font-bold rounded border no-underline ${currentPage < totalPages ? 'border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 cursor-pointer' : 'border-slate-200 text-slate-300 pointer-events-none opacity-50'}`}
-            >
-              Next ➔
-            </a>
-          </div>
-        </div>
-      </main>
-
-      <!-- Slide-Over Cart Drawer -->
-      <div id="cart-overlay" onclick="toggleCartDrawer(false)" style="transition: opacity 0.3s ease; opacity: 0; pointer-events: none;" class="fixed inset-0 bg-slate-950/60 z-50"></div>
-      <aside id="cart-drawer" style="transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform: translateX(100%);" class="fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-white z-50 shadow-2xl flex flex-col justify-between">
-        <div class="p-4 sm:p-6 border-b border-slate-200 flex items-center justify-between">
-          <div class="flex items-center space-x-2">
-            <svg class="w-5 h-5 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
-            <span class="font-extrabold text-sm uppercase tracking-wider text-slate-900">Your Cart</span>
-            <span id="cart-header-badge" class="bg-slate-900 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">0 ITEMS</span>
-          </div>
-          <div class="flex items-center space-x-2">
-            <button onclick="clearFullCart()" class="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer" title="Empty Cart">Clear All</button>
-            <button onclick="toggleCartDrawer(false)" class="w-8 h-8 rounded-full bg-white hover:bg-slate-200 text-slate-700 border border-slate-200 flex items-center justify-center transition-colors cursor-pointer" title="Close Cart">✕</button>
-          </div>
-        </div>
-
-        <div class="flex-1 overflow-y-auto p-4 space-y-4">
-          <div id="cart-items-list" class="space-y-3"></div>
-          <div class="pt-4 border-t border-slate-200 space-y-3">
-            <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-900">Customer Delivery Info</h4>
-            <div class="space-y-2">
-              <input id="checkout-name" type="text" placeholder="Enter Full Name (e.g. Divya Kodukula)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
-              <input id="checkout-phone" type="text" placeholder="Enter Phone Number (e.g. 8197921458)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
-              <input id="checkout-address" type="text" placeholder="Enter Delivery Address / Store Pickup" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
-            </div>
-          </div>
-        </div>
-
-        <div class="p-4 border-t border-slate-200 bg-slate-50 space-y-2.5">
-          <div class="space-y-1 text-xs border-b border-slate-200 pb-2">
-            <div class="flex justify-between items-center text-slate-500">
-              <span>Total MRP:</span>
-              <span id="cart-total-mrp" class="font-bold text-slate-700">₹ 0</span>
-            </div>
-            <div id="cart-savings-row" class="hidden flex justify-between items-center text-emerald-700 font-bold">
-              <span>Total Savings:</span>
-              <span id="cart-savings-val">- ₹ 0</span>
-            </div>
-          </div>
-
-          <div class="flex items-center justify-between font-bold text-slate-900 text-sm">
-            <span>Total Payable (COD):</span>
-            <span id="cart-total-price" class="text-rose-600 font-extrabold text-base">₹ 0</span>
-          </div>
-          <button onclick="placeRealWhatsAppOrder()" class="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs uppercase tracking-wider rounded flex items-center justify-center space-x-2 cursor-pointer shadow-md">
-            <span>Place Order & Open WhatsApp (COD)</span>
+      <!-- Catalog Toolbar -->
+      <div class="border-y border-slate-200 bg-white px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 select-none rounded-lg shadow-2xs">
+        <!-- Left: Layout Grid View Toggles -->
+        <div class="flex items-center space-x-2 border-r border-slate-200 pr-3 sm:pr-4">
+          <button onclick="setCatalogColumns(2)" class="p-1 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-900 cursor-pointer" title="2 Grid View">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zm-9 9h7v7H4v-7zm9 0h7v7h-7v-7z"/></svg>
+          </button>
+          <button onclick="setCatalogColumns(4)" class="p-1 hover:bg-slate-100 rounded text-slate-900 cursor-pointer" title="4 Grid View">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h4v4H3V3zm7 0h4v4h-4V3zm7 0h4v4h-4V3zM3 10h4v4H3v-4zm7 0h4v4h-4v-4zm7 0h4v4h-4v-4zM3 17h4v4H3v-4zm7 0h4v4h-4v-4zm7 0h4v4h-4v-4z"/></svg>
           </button>
         </div>
-      </aside>
 
-      <!-- Footer -->
-      <footer class="footer-art-bg text-white pt-12 pb-8 mt-16">
-        <div class="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 text-xs">
-          <div class="space-y-2">
-            <h4 class="font-extrabold uppercase tracking-wider text-sm mb-3">GET IN TOUCH</h4>
-            <p class="font-semibold">Whatsapp: <span class="underline">+{shop.phone || '918197921458'}</span></p>
-            <p class="text-slate-200">Mon-Sat 10AM - 6PM IST</p>
-            <p class="font-semibold">Email: <span class="underline">support@{shop.slug}.oorumart.in</span></p>
+        <!-- Center: Product Count -->
+        <div id="catalog-product-count" class="font-medium text-slate-500 text-xs tracking-wide">
+          {initialProducts.length} products
+        </div>
+
+        <!-- Right: Category, Price, Sort By & Reset -->
+        <div class="flex flex-wrap items-center border-l border-slate-200 pl-2 sm:pl-4 space-x-1 sm:space-x-3 font-medium">
+          <!-- Category Filter -->
+          <div class="flex items-center border-r border-slate-200 pr-1 sm:pr-3">
+            <select id="catalog-category-select" onchange="applyFiltersAndSort()" class="bg-transparent text-slate-700 hover:text-slate-900 font-semibold text-xs py-1 px-1.5 focus:outline-none cursor-pointer border-0">
+              <option value="all">Category: All</option>
+              {categories.map((c: any) => (
+                <option value={c.id} selected={categoryFilter === c.id}>{c.label}</option>
+              ))}
+            </select>
           </div>
-          <div class="space-y-2">
-            <h4 class="font-extrabold uppercase tracking-wider text-sm mb-3">NEED HELP</h4>
-            <p class="hover:underline cursor-pointer">FAQs</p>
-            <p class="hover:underline cursor-pointer" onclick="toggleTrackDrawer(true)">Track Order</p>
-            <p class="hover:underline cursor-pointer">Store Pickup</p>
+
+          <!-- Price Range Filter -->
+          <div class="flex items-center border-r border-slate-200 pr-1 sm:pr-3">
+            <select id="catalog-price-select" onchange="applyFiltersAndSort()" class="bg-transparent text-slate-700 hover:text-slate-900 font-semibold text-xs py-1 px-1.5 focus:outline-none cursor-pointer border-0">
+              <option value="all">Price: All</option>
+              <option value="under_300">Under ₹ 300</option>
+              <option value="300_700">₹ 300 - ₹ 700</option>
+              <option value="700_1500">₹ 700 - ₹ 1500</option>
+              <option value="above_1500">Above ₹ 1500</option>
+            </select>
           </div>
-          <div class="space-y-2">
-            <h4 class="font-extrabold uppercase tracking-wider text-sm mb-3">ABOUT US</h4>
-            <p class="hover:underline cursor-pointer">Our Story</p>
-            <p class="hover:underline cursor-pointer">{shop.name} Community</p>
+
+          <!-- Sort By Dropdown -->
+          <div class="flex items-center border-r border-slate-200 pr-1 sm:pr-3">
+            <select id="catalog-sort-select" onchange="applyFiltersAndSort()" class="bg-transparent text-slate-700 hover:text-slate-900 font-semibold text-xs py-1 px-1.5 focus:outline-none cursor-pointer border-0">
+              <option value="featured">Sort by: Featured</option>
+              <option value="price_low_high">Price: Low to High</option>
+              <option value="price_high_low">Price: High to Low</option>
+              <option value="name_asc">Alphabetical: A to Z</option>
+              <option value="name_desc">Alphabetical: Z to A</option>
+            </select>
           </div>
+
+          <!-- Reset Button -->
+          <button onclick="resetFilters()" class="text-slate-500 hover:text-rose-600 font-semibold text-xs cursor-pointer transition-colors bg-transparent border-0 px-2 py-1">
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <div id="catalog-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
+        {paginatedProducts.map((product: any) => (
+          <ProductCard product={product} />
+        ))}
+      </div>
+
+      <!-- Pagination Controls Bar -->
+      <div id="pagination-controls" class="mt-10 pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div id="pagination-summary" class="text-xs font-semibold text-slate-500">
+          Showing <span id="pag-start-count">{totalMatching > 0 ? startIndex + 1 : 0}</span> to <span id="pag-end-count">{endIndex}</span> of <span id="pag-total-count">{totalMatching}</span> products
+        </div>
+
+        <div id="pagination-buttons" class="flex flex-wrap items-center justify-center gap-1.5 select-none">
+          <!-- Prev Button -->
+          <a 
+            href={currentPage > 1 ? `?category=${categoryFilter}&page=${currentPage - 1}${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}` : '#'} 
+            class={`px-3 py-2 text-xs font-bold rounded border no-underline ${currentPage > 1 ? 'border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 cursor-pointer' : 'border-slate-200 text-slate-300 pointer-events-none opacity-50'}`}
+          >
+            ⬅ Prev
+          </a>
+
+          <!-- Page Number Links -->
+          {paginationRange.map((item) => (
+            typeof item === 'number' ? (
+              <a 
+                href={`?category=${categoryFilter}&page=${item}${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}`}
+                class={`px-3 py-2 text-xs font-bold rounded border no-underline ${item === currentPage ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+              >
+                {item}
+              </a>
+            ) : (
+              <span class="px-2 py-2 text-xs font-bold text-slate-400 select-none">...</span>
+            )
+          ))}
+
+          <!-- Next Button -->
+          <a 
+            href={currentPage < totalPages ? `?category=${categoryFilter}&page=${currentPage + 1}${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}` : '#'} 
+            class={`px-3 py-2 text-xs font-bold rounded border no-underline ${currentPage < totalPages ? 'border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 cursor-pointer' : 'border-slate-200 text-slate-300 pointer-events-none opacity-50'}`}
+          >
+            Next ➔
+          </a>
+        </div>
+      </div>
+    </main>
+
+    <!-- Store Footer Component -->
+    <StoreFooter shopName={shop.name} logoUrl={shop.logo_url} primaryColor={primaryColor} />
+
+    <!-- Slide-Over Cart Drawer -->
+    <div id="cart-overlay" onclick="toggleCartDrawer(false)" style="transition: opacity 0.3s ease; opacity: 0; pointer-events: none;" class="fixed inset-0 bg-slate-950/60 z-50"></div>
+    <aside id="cart-drawer" style="transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform: translateX(100%);" class="fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-white z-50 shadow-2xl flex flex-col justify-between">
+      <div class="p-4 sm:p-6 border-b border-slate-200 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <svg class="w-5 h-5 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+          <span class="font-extrabold text-sm uppercase tracking-wider text-slate-900">Your Cart</span>
+          <span id="cart-header-badge" class="bg-slate-900 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">0 ITEMS</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="clearFullCart()" class="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer" title="Empty Cart">Clear All</button>
+          <button onclick="toggleCartDrawer(false)" class="w-8 h-8 rounded-full bg-white hover:bg-slate-200 text-slate-700 border border-slate-200 flex items-center justify-center transition-colors cursor-pointer" title="Close Cart">✕</button>
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-4">
+        <div id="cart-items-list" class="space-y-3"></div>
+        <div class="pt-4 border-t border-slate-200 space-y-3">
+          <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-900">Customer Delivery Info</h4>
           <div class="space-y-2">
-            <h4 class="font-extrabold uppercase tracking-wider text-sm mb-3">COMPANY</h4>
-            <p class="hover:underline cursor-pointer">Privacy Policy</p>
-            <p class="hover:underline cursor-pointer">Terms Of Use</p>
+            <input id="checkout-name" type="text" placeholder="Enter Full Name (e.g. Divya Kodukula)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
+            <input id="checkout-phone" type="text" placeholder="Enter Phone Number (e.g. 8197921458)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
+            <input id="checkout-address" type="text" placeholder="Enter Delivery Address / Store Pickup" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
           </div>
         </div>
-        <div class="max-w-7xl mx-auto px-6 pt-8 mt-8 border-t border-white/20 text-[11px] text-slate-200 flex justify-between">
-          <p>© 2026 {shop.name}</p>
-          <p>Powered by oorumart.in</p>
-        </div>
-      </footer>
+      </div>
 
-  <!-- Aesthetic Shop Toast Notification Modal -->
-  <div id="shop-toast-modal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
-    <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl border border-slate-200 transform scale-95 transition-transform duration-300" id="shop-toast-card">
-      <div id="shop-toast-icon" class="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center text-2xl mx-auto font-bold">
-        ⚠️
+      <div class="p-4 border-t border-slate-200 bg-slate-50 space-y-2.5">
+        <div class="space-y-1 text-xs border-b border-slate-200 pb-2">
+          <div class="flex justify-between items-center text-slate-500">
+            <span>Total MRP:</span>
+            <span id="cart-total-mrp" class="font-bold text-slate-700">₹ 0</span>
+          </div>
+          <div id="cart-savings-row" class="hidden flex justify-between items-center text-emerald-700 font-bold">
+            <span>Total Savings:</span>
+            <span id="cart-savings-val">- ₹ 0</span>
+          </div>
+        </div>
+
+        <div class="flex justify-between items-center text-sm font-bold text-slate-900">
+          <span>Total Payable (COD):</span>
+          <span id="cart-total-price" class="text-rose-600 font-extrabold text-base">₹ 0</span>
+        </div>
+
+        <button onclick="placeRealWhatsAppOrder()" class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs uppercase tracking-widest rounded shadow-md transition-colors cursor-pointer">
+          Place COD Order Now ➔
+        </button>
       </div>
-      <div class="space-y-1">
-        <h3 id="shop-toast-title" class="font-serif-title font-extrabold text-base text-slate-900 uppercase">Notification</h3>
-        <p id="shop-toast-message" class="text-xs text-slate-500 leading-relaxed">Message details</p>
+    </aside>
+
+    <!-- Track Order Drawer -->
+    <div id="track-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 opacity-0 pointer-events-none transition-opacity duration-300" onclick="toggleTrackDrawer(false)"></div>
+    <aside id="track-drawer" class="fixed top-0 right-0 h-full w-full sm:w-[380px] bg-white z-50 shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out flex flex-col p-6 space-y-6">
+      <div class="flex justify-between items-center border-b border-slate-200 pb-4">
+        <h2 class="font-extrabold text-slate-900 uppercase text-sm tracking-wider">Track Your Orders</h2>
+        <button onclick="toggleTrackDrawer(false)" class="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center font-bold text-slate-600 cursor-pointer">✕</button>
       </div>
-      <button onclick="closeShopToast()" class="w-full py-2.5 bg-slate-900 text-white font-bold text-xs uppercase tracking-wider rounded-lg hover:bg-slate-800 transition-colors shadow-xs">
-        OK
-      </button>
+
+      <div class="space-y-3">
+        <label class="text-xs font-bold text-slate-700">Enter Your Registered Phone Number:</label>
+        <div class="flex gap-2">
+          <input type="tel" id="track-input" placeholder="e.g. 9876543210" class="flex-1 text-xs p-2.5 border border-slate-300 rounded focus:ring-1 focus:ring-slate-900 outline-none" />
+          <button onclick="lookupOrderStatus()" class="px-4 py-2.5 bg-slate-900 text-white font-bold text-xs rounded hover:bg-slate-800 cursor-pointer">Search</button>
+        </div>
+      </div>
+
+      <div id="track-results-box" class="flex-1 overflow-y-auto space-y-3">
+        <div class="text-center py-8 text-slate-400 text-xs">Enter phone number to view live COD order status.</div>
+      </div>
+    </aside>
+
+    <!-- Toast Notification Modal -->
+    <div id="shop-toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 text-white p-4 rounded-xl shadow-2xl flex items-center space-x-3 max-w-sm border border-slate-700">
+      <span id="toast-icon" class="text-2xl">✨</span>
+      <div>
+        <h4 id="toast-title" class="font-bold text-xs text-white">Notification</h4>
+        <p id="toast-message" class="text-[11px] text-slate-300 mt-0.5">Operation complete.</p>
+      </div>
     </div>
-  </div>
 
-      <script define:vars={{ currentShopSlug: shop?.slug || '', currentShopName: shop?.name || 'Marketplace', currentShopPhone: shop?.phone || '918197921458', initialProductsData: isGlobalCatalog ? globalProducts : products }}>
-        let cart = {};
-        let allCatalogProducts = Array.isArray(initialProductsData) ? [...initialProductsData] : [];
-        
-        // Dynamic Client-Side Pagination State
-        const PAGE_SIZE = 16;
-        const initialUrlParams = new URLSearchParams(window.location.search);
-        window.catalogCurrentPage = Math.max(1, parseInt(initialUrlParams.get('page') || '1', 10));
+    <!-- Client Script for Catalog Interactions -->
+    <script is:inline define:vars={{ initialCatalogProducts: initialProducts, currentShopName: shop.name }}>
+      const allCatalogProducts = initialCatalogProducts;
+      let activeFilteredProducts = [...allCatalogProducts];
+      let currentClientPage = 1;
+      const CLIENT_PAGE_SIZE = 16;
+      let cart = {};
 
-        window.goToCatalogPage = function(pNum) {
-          window.catalogCurrentPage = pNum;
-          window.applyFiltersAndSort(false);
-          document.getElementById('catalog-grid')?.scrollIntoView({ behavior: 'smooth' });
-        };
+      window.setCatalogColumns = function(cols) {
+        const grid = document.getElementById('catalog-grid');
+        if (!grid) return;
+        if (cols === 2) {
+          grid.className = 'grid grid-cols-2 gap-4 sm:gap-6';
+        } else {
+          grid.className = 'grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6';
+        }
+      };
 
-        window.applyFiltersAndSort = function(resetPage = false) {
-          if (resetPage) window.catalogCurrentPage = 1;
+      window.applyFiltersAndSort = function() {
+        const catVal = document.getElementById('catalog-category-select')?.value || 'all';
+        const priceVal = document.getElementById('catalog-price-select')?.value || 'all';
+        const sortVal = document.getElementById('catalog-sort-select')?.value || 'featured';
 
-          const categoryVal = document.getElementById('catalog-category-select')?.value || 'all';
-          const priceVal = document.getElementById('catalog-price-select')?.value || 'all';
-          const sortVal = document.getElementById('catalog-sort-select')?.value || 'featured';
-
-          const catSelectElem = document.getElementById('catalog-category-select');
-          const selectedOptionText = catSelectElem ? catSelectElem.options[catSelectElem.selectedIndex]?.text : '';
-          const titleElem = document.getElementById('catalog-header-title');
-          if (titleElem && selectedOptionText) {
-            titleElem.innerText = categoryVal === 'all' ? 'CATALOG & COLLECTION' : selectedOptionText.toUpperCase();
+        let filtered = allCatalogProducts.filter(p => {
+          if (catVal !== 'all' && p.category_id !== catVal && (!Array.isArray(p.tags) || !p.tags.includes(catVal))) {
+            return false;
           }
+          const price = Number(p.price || 0);
+          if (priceVal === 'under_300' && price >= 300) return false;
+          if (priceVal === '300_700' && (price < 300 || price > 700)) return false;
+          if (priceVal === '700_1500' && (price < 700 || price > 1500)) return false;
+          if (priceVal === 'above_1500' && price <= 1500) return false;
+          return true;
+        });
 
-          let filtered = allCatalogProducts.filter(p => {
-            if (categoryVal !== 'all') {
-              const matchesCat = p.category_id === categoryVal;
-              const matchesTag = Array.isArray(p.tags) 
-                ? p.tags.includes(categoryVal) 
-                : (typeof p.tags === 'string' ? p.tags.split(',').map(t => t.trim().toLowerCase()).includes(categoryVal) : false);
-              if (!matchesCat && !matchesTag) return false;
-            }
-            const mrp = Number(p.mrp || p.price || 0);
-            const disc = p.discount !== undefined ? Number(p.discount) : (p.price && mrp > p.price ? Math.round(((mrp - p.price) / mrp) * 100) : 0);
-            const price = Math.round(mrp * (1 - disc / 100));
+        if (sortVal === 'price_low_high') filtered.sort((a, b) => Number(a.price) - Number(b.price));
+        else if (sortVal === 'price_high_low') filtered.sort((a, b) => Number(b.price) - Number(a.price));
+        else if (sortVal === 'name_asc') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        else if (sortVal === 'name_desc') filtered.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
 
-            if (priceVal === 'under_300' && price >= 300) return false;
-            if (priceVal === '300_700' && (price < 300 || price > 700)) return false;
-            if (priceVal === '700_1500' && (price < 700 || price > 1500)) return false;
-            if (priceVal === 'above_1500' && price <= 1500) return false;
-            return true;
-          });
+        activeFilteredProducts = filtered;
+        currentClientPage = 1;
+        renderCatalogPage();
+      };
 
-          const getPrice = (item) => {
-            const m = Number(item.mrp || item.price || 0);
-            const d = item.discount !== undefined ? Number(item.discount) : (item.price && m > item.price ? Math.round(((m - item.price) / m) * 100) : 0);
-            return Math.round(m * (1 - d / 100));
-          };
+      window.resetFilters = function() {
+        const catSelect = document.getElementById('catalog-category-select');
+        const priceSelect = document.getElementById('catalog-price-select');
+        const sortSelect = document.getElementById('catalog-sort-select');
+        if (catSelect) catSelect.value = 'all';
+        if (priceSelect) priceSelect.value = 'all';
+        if (sortSelect) sortSelect.value = 'featured';
+        activeFilteredProducts = [...allCatalogProducts];
+        currentClientPage = 1;
+        renderCatalogPage();
+      };
 
-          if (sortVal === 'price_low_high') {
-            filtered.sort((a, b) => getPrice(a) - getPrice(b));
-          } else if (sortVal === 'price_high_low') {
-            filtered.sort((a, b) => getPrice(b) - getPrice(a));
-          } else if (sortVal === 'name_asc') {
-            filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-          } else if (sortVal === 'name_desc') {
-            filtered.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
-          }
+      window.renderCatalogPage = function() {
+        const grid = document.getElementById('catalog-grid');
+        const countElem = document.getElementById('catalog-product-count');
+        if (countElem) countElem.innerText = `${activeFilteredProducts.length} products`;
 
-          const totalItems = filtered.length;
-          const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
-          if (window.catalogCurrentPage > totalPages) window.catalogCurrentPage = 1;
+        const totalItems = activeFilteredProducts.length;
+        const totalPages = Math.max(1, Math.ceil(totalItems / CLIENT_PAGE_SIZE));
+        const safePage = Math.min(currentClientPage, totalPages);
+        const startIdx = (safePage - 1) * CLIENT_PAGE_SIZE;
+        const endIdx = Math.min(startIdx + CLIENT_PAGE_SIZE, totalItems);
+        const pageItems = activeFilteredProducts.slice(startIdx, endIdx);
 
-          const startIdx = (window.catalogCurrentPage - 1) * PAGE_SIZE;
-          const endIdx = Math.min(startIdx + PAGE_SIZE, totalItems);
-          const pageItems = filtered.slice(startIdx, endIdx);
+        if (grid) {
+          if (pageItems.length === 0) {
+            grid.innerHTML = `<div class="col-span-full py-12 text-center text-xs text-slate-500 bg-slate-50 border border-dashed border-slate-300 rounded-xl">No products match your selected filters. Click "Reset Filters" to clear.</div>`;
+          } else {
+            grid.innerHTML = pageItems.map(product => {
+              const itemMrp = Number(product.mrp || product.price || 0);
+              const itemDisc = product.discount !== undefined ? Number(product.discount) : (product.price && itemMrp > product.price ? Math.round(((itemMrp - product.price) / itemMrp) * 100) : 0);
+              const itemPrice = Math.round(itemMrp * (1 - itemDisc / 100));
 
-          const countElem = document.getElementById('catalog-product-count');
-          if (countElem) countElem.innerText = `${totalItems} products`;
+              return `
+              <div class="catalog-item space-y-2 sm:space-y-3 group">
+                <div class="relative aspect-square overflow-hidden bg-[#F5F3EE] cursor-pointer rounded-lg">
+                  <a href="/product/${product.id}" class="block w-full h-full">
+                    <img src="${product.image_url}" alt="${product.name}" loading="lazy" class="w-full h-full object-contain p-3 mix-blend-multiply group-hover:scale-105 transition-transform duration-500" />
+                  </a>
+                  ${product.badge ? `<span class="absolute top-2 left-2 bg-[#1D2228] text-white text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 sm:py-1 rounded">${product.badge}</span>` : ''}
+                </div>
 
-          const grid = document.getElementById('catalog-grid');
-          if (grid) {
-            if (totalItems === 0) {
-              grid.innerHTML = `<div class="col-span-full py-12 text-center text-xs text-slate-500 bg-slate-50 border border-dashed border-slate-300 rounded-xl">No products match your selected filters. Click "Reset Filters" to clear.</div>`;
-            } else {
-              grid.innerHTML = pageItems.map(product => {
-                const itemMrp = Number(product.mrp || product.price || 0);
-                const itemDisc = product.discount !== undefined ? Number(product.discount) : (product.price && itemMrp > product.price ? Math.round(((itemMrp - product.price) / itemMrp) * 100) : 0);
-                const itemPrice = Math.round(itemMrp * (1 - itemDisc / 100));
-
-                return `
-                <div class="catalog-item space-y-2 sm:space-y-3 group">
-                  <div class="relative aspect-square overflow-hidden bg-[#F5F3EE] cursor-pointer rounded-lg">
-                    <a href="/product/${product.id}?shop=${product.shopSlug || currentShopSlug}" class="block w-full h-full">
-                      <img src="${product.image_url}" alt="${product.name}" loading="lazy" class="w-full h-full object-contain p-3 mix-blend-multiply group-hover:scale-105 transition-transform duration-500" />
-                    </a>
-                    ${product.badge ? `<span class="absolute top-2 left-2 bg-[#1D2228] text-white text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 sm:py-1 rounded">${product.badge}</span>` : ''}
-                  </div>
-
-                  <div class="space-y-1">
-                    <a href="/product/${product.id}?shop=${product.shopSlug || currentShopSlug}" class="no-underline block">
-                      <h3 class="text-xs font-semibold text-slate-900 leading-snug line-clamp-2 hover:text-rose-600 transition-colors">${product.name}</h3>
-                    </a>
-                    <div class="flex items-center justify-between pt-0.5">
-                      <div class="text-[11px] sm:text-xs font-medium space-x-1">
-                        <span class="font-bold text-slate-900">Price:</span>
-                        <span class="font-bold text-rose-600">₹ ${itemPrice}</span>
-                        ${itemDisc > 0 && itemMrp > itemPrice ? `<span class="line-through text-slate-400">₹ ${itemMrp}</span>` : ''}
-                        ${itemDisc > 0 ? `<span class="font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded text-[10px] ml-1">${itemDisc}% OFF</span>` : ''}
-                      </div>
-                      <button 
-                        type="button"
-                        class="add-btn text-xs font-semibold px-2 py-1 bg-slate-100 hover:bg-slate-900 hover:text-white rounded transition-colors cursor-pointer border border-slate-300"
-                        title="Quick Add to Cart"
-                        onclick="event.preventDefault(); event.stopPropagation(); addToCart('${product.id}', '${(product.name || '').replace(/'/g, "\\'")}', ${itemPrice}, ${itemMrp}, '${product.image_url}', 100, ${itemDisc})"
-                      >
-                        + Add
-                      </button>
+                <div class="space-y-1">
+                  <a href="/product/${product.id}" class="no-underline block">
+                    <h3 class="text-xs font-semibold text-slate-900 leading-snug line-clamp-2 hover:text-rose-600 transition-colors">${product.name}</h3>
+                  </a>
+                  <div class="flex items-center justify-between pt-0.5">
+                    <div class="text-[11px] sm:text-xs font-medium space-x-1">
+                      <span class="font-bold text-slate-900">Price:</span>
+                      <span class="font-bold text-rose-600">₹ ${itemPrice}</span>
+                      ${itemDisc > 0 && itemMrp > itemPrice ? `<span class="line-through text-slate-400">₹ ${itemMrp}</span>` : ''}
+                      ${itemDisc > 0 ? `<span class="font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded text-[10px] ml-1">${itemDisc}% OFF</span>` : ''}
                     </div>
+                    <button 
+                      type="button"
+                      class="add-btn text-xs font-semibold px-2 py-1 bg-slate-100 hover:bg-slate-900 hover:text-white rounded transition-colors cursor-pointer border border-slate-300"
+                      title="Quick Add to Cart"
+                      onclick="event.preventDefault(); event.stopPropagation(); addToCart('${product.id}', '${(product.name || '').replace(/'/g, "\\'")}', ${itemPrice}, ${itemMrp}, '${product.image_url}', 100, ${itemDisc})"
+                    >
+                      + Add
+                    </button>
                   </div>
                 </div>
-              `;
-              }).join('');
-            }
-          }
-
-          // Update Pagination Summary & Buttons Controls Dynamically
-          const summaryElem = document.getElementById('pagination-summary');
-          if (summaryElem) {
-            summaryElem.innerHTML = `Showing <span id="pag-start-count">${totalItems > 0 ? startIdx + 1 : 0}</span> to <span id="pag-end-count">${endIdx}</span> of <span id="pag-total-count">${totalItems}</span> products`;
-          }
-
-          const buttonsElem = document.getElementById('pagination-buttons');
-          if (buttonsElem) {
-            let btnsHtml = `
-              <button 
-                onclick="goToCatalogPage(${window.catalogCurrentPage - 1})" 
-                class="px-3 py-2 text-xs font-bold rounded border ${window.catalogCurrentPage > 1 ? 'border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 cursor-pointer' : 'border-slate-200 text-slate-300 pointer-events-none opacity-50'}"
-              >
-                ⬅ Prev
-              </button>
+              </div>
             `;
-
-            function getPaginationRange(current, total) {
-              if (total <= 7) {
-                return Array.from({ length: total }, (_, i) => i + 1);
-              }
-              if (current <= 4) {
-                return [1, 2, 3, 4, 5, '...', total];
-              }
-              if (current >= total - 3) {
-                return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
-              }
-              return [1, '...', current - 1, current, current + 1, '...', total];
-            }
-
-            const range = getPaginationRange(window.catalogCurrentPage, totalPages);
-            range.forEach(item => {
-              if (typeof item === 'number') {
-                btnsHtml += `
-                  <button 
-                    onclick="goToCatalogPage(${item})" 
-                    class="px-3 py-2 text-xs font-bold rounded border ${item === window.catalogCurrentPage ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer'}"
-                  >
-                    ${item}
-                  </button>
-                `;
-              } else {
-                btnsHtml += `<span class="px-2 py-2 text-xs font-bold text-slate-400 select-none">...</span>`;
-              }
-            });
-
-            btnsHtml += `
-              <button 
-                onclick="goToCatalogPage(${window.catalogCurrentPage + 1})" 
-                class="px-3 py-2 text-xs font-bold rounded border ${window.catalogCurrentPage < totalPages ? 'border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 cursor-pointer' : 'border-slate-200 text-slate-300 pointer-events-none opacity-50'}"
-              >
-                Next ➔
-              </button>
-            `;
-            buttonsElem.innerHTML = btnsHtml;
+            }).join('');
           }
-        };
+        }
 
-        window.resetFilters = function() {
-          const catSelect = document.getElementById('catalog-category-select');
-          const priceSelect = document.getElementById('catalog-price-select');
-          const sortSelect = document.getElementById('catalog-sort-select');
+        const summaryElem = document.getElementById('pagination-summary');
+        if (summaryElem) {
+          summaryElem.innerHTML = `Showing <span id="pag-start-count">${totalItems > 0 ? startIdx + 1 : 0}</span> to <span id="pag-end-count">${endIdx}</span> of <span id="pag-total-count">${totalItems}</span> products`;
+        }
+      };
 
-          if (catSelect) catSelect.value = 'all';
-          if (priceSelect) priceSelect.value = 'all';
-          if (sortSelect) sortSelect.value = 'featured';
-
-          window.applyFiltersAndSort();
-        };
-
-        window.setCatalogColumns = function(cols) {
-          const grid = document.getElementById('catalog-grid');
-          if (grid) {
-            if (cols === 2) {
-              grid.className = 'grid grid-cols-2 gap-4 sm:gap-6';
-            } else {
-              grid.className = 'grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6';
-            }
+      // Cart logic
+      window.loadCart = function() {
+        try {
+          let saved = localStorage.getItem('yesfancy_cart');
+          if (!saved) {
+            saved = localStorage.getItem('oorumart_cart_yesfancy');
+            if (saved) localStorage.setItem('yesfancy_cart', saved);
           }
-        };
-
-        window.showShopToast = function(title, message, icon = '⚠️') {
-          const modal = document.getElementById('shop-toast-modal');
-          const card = document.getElementById('shop-toast-card');
-          const iconElem = document.getElementById('shop-toast-icon');
-          const titleElem = document.getElementById('shop-toast-title');
-          const msgElem = document.getElementById('shop-toast-message');
-
-          if (iconElem) iconElem.innerText = icon;
-          if (titleElem) titleElem.innerText = title;
-          if (msgElem) msgElem.innerText = message;
-
-          if (modal) modal.classList.remove('opacity-0', 'pointer-events-none');
-          if (card) { card.classList.remove('scale-95'); card.classList.add('scale-100'); }
-        };
-
-        window.closeShopToast = function() {
-          const modal = document.getElementById('shop-toast-modal');
-          const card = document.getElementById('shop-toast-card');
-          if (modal) modal.classList.add('opacity-0', 'pointer-events-none');
-          if (card) { card.classList.remove('scale-100'); card.classList.add('scale-95'); }
-        };
-
-        window.loadCart = function() {
-          try {
-            const saved = localStorage.getItem(`oorumart_cart_${currentShopSlug}`);
-            if (saved) cart = JSON.parse(saved);
-          } catch (e) { cart = {}; }
-          window.renderCart();
-        };
-
-        window.saveCart = function() {
-          try { localStorage.setItem(`oorumart_cart_${currentShopSlug}`, JSON.stringify(cart)); } catch (e) {}
-          window.renderCart();
-        };
-
-        window.addToCart = function(id, name, price, mrp, image, stock = 100, discount = 0) {
-          const finalMrp = Number(mrp || price || 0);
-          const finalDisc = Number(discount || 0);
-          const finalPrice = Math.round(finalMrp * (1 - finalDisc / 100));
-
-          if (cart[id]) { cart[id].qty += 1; }
-          else { cart[id] = { id, name, price: finalPrice, mrp: finalMrp, discount: finalDisc, image, image_url: image, qty: 1 }; }
-          window.saveCart();
-          window.toggleCartDrawer(true);
-        };
-
-        window.updateCartQty = function(id, delta) {
-          if (cart[id]) {
-            cart[id].qty += delta;
-            if (cart[id].qty <= 0) delete cart[id];
-          }
-          window.saveCart();
-        };
-
-        window.clearFullCart = function() {
+          if (saved) cart = JSON.parse(saved);
+        } catch (e) {
           cart = {};
+        }
+        window.renderCart();
+      };
+
+      window.saveCart = function() {
+        try {
+          localStorage.setItem('yesfancy_cart', JSON.stringify(cart));
+        } catch (e) {}
+        window.renderCart();
+      };
+
+      window.clearFullCart = function() {
+        cart = {};
+        window.saveCart();
+      };
+
+      window.addToCart = function(id, name, price, mrp, image_url, stock = 100, discount = 0) {
+        const finalMrp = Number(mrp || price || 0);
+        const finalDiscount = Number(discount || 0);
+        const finalPrice = Math.round(finalMrp * (1 - finalDiscount / 100));
+
+        if (cart[id]) {
+          cart[id].qty += 1;
+        } else {
+          cart[id] = { id, name, price: finalPrice, mrp: finalMrp, discount: finalDiscount, image: image_url, image_url, qty: 1, stock };
+        }
+        window.saveCart();
+        window.toggleCartDrawer(true);
+      };
+
+      window.updateCartQty = function(id, delta) {
+        if (cart[id]) {
+          cart[id].qty += delta;
+          if (cart[id].qty <= 0) delete cart[id];
           window.saveCart();
-        };
+        }
+      };
 
-        window.renderCart = function() {
-          const itemsList = document.getElementById('cart-items-list');
-          const badge = document.getElementById('cart-count-badge');
-          const headerBadge = document.getElementById('cart-header-badge');
-          const totalPriceElem = document.getElementById('cart-total-price');
-          const totalMrpElem = document.getElementById('cart-total-mrp');
-          const savingsVal = document.getElementById('cart-savings-val');
-          const savingsRow = document.getElementById('cart-savings-row');
+      window.renderCart = function() {
+        const itemsList = document.getElementById('cart-items-list');
+        const badge = document.getElementById('cart-count-badge');
+        const headerBadge = document.getElementById('cart-header-badge');
+        const totalPriceElem = document.getElementById('cart-total-price');
+        const totalMrpElem = document.getElementById('cart-total-mrp');
+        const savingsVal = document.getElementById('cart-savings-val');
+        const savingsRow = document.getElementById('cart-savings-row');
 
-          let totalQty = 0;
-          let totalPrice = 0;
-          let totalMrp = 0;
-          if (itemsList) itemsList.innerHTML = '';
+        let totalQty = 0;
+        let totalPrice = 0;
+        let totalMrp = 0;
+        if (itemsList) itemsList.innerHTML = '';
 
-          const keys = Object.keys(cart);
-          if (keys.length === 0) {
-            if (itemsList) {
-              itemsList.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-semibold">Your cart for ${currentShopName} is empty. Add items to checkout!</div>`;
-            }
-          } else {
-            keys.forEach(id => {
-              const item = cart[id];
-              const itemMrp = Number(item.mrp || item.price || 0);
-              const itemDisc = Number(item.discount || 0);
-              const itemPrice = Math.round(itemMrp * (1 - itemDisc / 100));
-              const imgUrl = item.image_url || item.image || item.imageUrl || '/images/placeholder.webp';
-
-              totalQty += item.qty;
-              totalPrice += itemPrice * item.qty;
-              totalMrp += itemMrp * item.qty;
-
-              if (itemsList) {
-                const div = document.createElement('div');
-                div.className = 'border border-slate-200 rounded-lg p-3 flex space-x-3 items-center';
-                div.innerHTML = `
-                  <img src="${imgUrl}" onerror="this.onerror=null;this.src='/images/placeholder.webp';" alt="${item.name || 'Product'}" class="w-14 h-14 object-contain rounded-md border border-slate-100 bg-slate-50 p-1" />
-                  <div class="flex-1 space-y-1">
-                    <h4 class="text-xs font-bold text-slate-900 line-clamp-1">${item.name}</h4>
-                    <div class="flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                      <span class="text-rose-600">₹ ${itemPrice}</span>
-                      ${itemDisc > 0 ? `<span class="text-slate-400 font-normal line-through text-[11px]">₹ ${itemMrp}</span>
-                      <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded">${itemDisc}% OFF</span>` : ''}
-                    </div>
-                  </div>
-                  <div class="flex items-center space-x-2 border border-slate-300 rounded px-2 py-1 text-xs">
-                    <button onclick="updateCartQty('${id}', -1)" class="font-bold cursor-pointer px-1 hover:text-rose-600">-</button>
-                    <span class="font-bold px-1">${item.qty}</span>
-                    <button onclick="updateCartQty('${id}', 1)" class="font-bold cursor-pointer px-1 hover:text-emerald-600">+</button>
-                  </div>
-                `;
-                itemsList.appendChild(div);
-              }
-            });
+        const keys = Object.keys(cart);
+        if (keys.length === 0) {
+          if (itemsList) {
+            itemsList.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-semibold">Your cart is empty. Add items to checkout!</div>`;
           }
-
-          const totalSavings = Math.max(0, totalMrp - totalPrice);
-
-          if (badge) badge.innerText = totalQty;
-          if (headerBadge) headerBadge.innerText = `${totalQty} ${totalQty === 1 ? 'ITEM' : 'ITEMS'}`;
-          if (totalPriceElem) totalPriceElem.innerText = `₹ ${totalPrice}`;
-          if (totalMrpElem) totalMrpElem.innerText = `₹ ${totalMrp}`;
-          if (savingsVal) savingsVal.innerText = `- ₹ ${totalSavings}`;
-          if (savingsRow) {
-            if (totalSavings > 0) savingsRow.classList.remove('hidden');
-            else savingsRow.classList.add('hidden');
-          }
-        };
-
-        window.placeRealWhatsAppOrder = async function() {
-          const keys = Object.keys(cart);
-          if (keys.length === 0) {
-            window.showShopToast('Empty Cart', 'Your cart is empty! Please add products to checkout.', '🛒');
-            return;
-          }
-
-          const nameInput = document.getElementById('checkout-name')?.value.trim() || 'Valued Customer';
-          const phoneInput = document.getElementById('checkout-phone')?.value.trim();
-          const addressInput = document.getElementById('checkout-address')?.value.trim() || 'Store Pickup';
-
-          if (!phoneInput) {
-            window.showShopToast('Missing Phone Number', 'Please enter your phone number to place order & track delivery!', '📱');
-            return;
-          }
-
-          let totalPrice = 0;
-          let itemLines = [];
+        } else {
           keys.forEach(id => {
             const item = cart[id];
-            totalPrice += item.price * item.qty;
-            itemLines.push(`- ${item.name} (Qty: ${item.qty}) = Rs. ${item.price * item.qty}`);
-          });
+            const itemMrp = Number(item.mrp || item.price || 0);
+            const itemDisc = Number(item.discount || 0);
+            const itemPrice = Math.round(itemMrp * (1 - itemDisc / 100));
+            const imgUrl = item.image_url || item.image || item.imageUrl || '/images/placeholder.webp';
 
-          const prefix = (currentShopSlug || 'OM').toUpperCase().slice(0, 3);
-          const orderId = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
-          const newOrder = {
-            order_id: orderId,
-            shop_slug: currentShopSlug,
-            customer_name: nameInput,
-            phone: phoneInput,
-            address: addressInput,
-            items: itemLines,
-            total: totalPrice,
-            timestamp: new Date().toLocaleString(),
-            status: 'Order Placed & Processing'
-          };
+            totalQty += item.qty;
+            totalPrice += itemPrice * item.qty;
+            totalMrp += itemMrp * item.qty;
 
-          try {
-            await fetch('/api/orders', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newOrder)
-            });
-          } catch (e) {
-            console.error('Error posting order to API:', e);
-          }
-
-          try {
-            let orders = JSON.parse(localStorage.getItem(`oorumart_orders_${currentShopSlug}`) || '[]');
-            orders.unshift(newOrder);
-            localStorage.setItem(`oorumart_orders_${currentShopSlug}`, JSON.stringify(orders));
-          } catch (e) {}
-
-          cart = {};
-          window.saveCart();
-
-          window.toggleCartDrawer(false);
-          window.toggleTrackDrawer(true);
-          const trackInput = document.getElementById('track-input');
-          if (trackInput) trackInput.value = phoneInput;
-          window.lookupOrderStatus();
-
-          window.showShopToast(
-            '🎉 Order Placed Successfully!',
-            `Order #${orderId} (₹ ${totalPrice}) has been sent directly to ${currentShopName}. You can track your order status live right here!`,
-            '🛍️'
-          );
-        };
-
-        window.toggleTrackDrawer = function(open) {
-          const overlay = document.getElementById('track-overlay');
-          const drawer = document.getElementById('track-drawer');
-          if (open) {
-            overlay?.classList.remove('opacity-0', 'pointer-events-none');
-            drawer?.classList.remove('translate-x-full');
-          } else {
-            overlay?.classList.add('opacity-0', 'pointer-events-none');
-            drawer?.classList.add('translate-x-full');
-          }
-        };
-
-        window.lookupOrderStatus = async function() {
-          const phone = document.getElementById('track-input')?.value.trim();
-          const resultsBox = document.getElementById('track-results-box') || document.getElementById('track-status-box');
-          if (!phone || !resultsBox) return;
-
-          let orders = [];
-          try {
-            const res = await fetch(`/api/orders?shop=${currentShopSlug}`);
-            const data = await res.json();
-            orders = (data.orders || []).filter(o => o.phone && o.phone.includes(phone));
-          } catch (e) {}
-
-          if (orders.length === 0) {
-            resultsBox.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs bg-slate-50 border border-dashed border-slate-300 rounded-lg">No active orders found for phone number ${phone}.</div>`;
-          } else {
-            resultsBox.innerHTML = orders.map(o => `
-              <div class="border border-slate-200 rounded-lg p-3 space-y-2 bg-slate-50 mb-2">
-                <div class="flex justify-between items-center text-xs font-bold">
-                  <span>Order #${o.order_id}</span>
-                  <span class="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded">${o.status}</span>
+            if (itemsList) {
+              const div = document.createElement('div');
+              div.className = 'border border-slate-200 rounded-lg p-3 flex space-x-3 items-center';
+              div.innerHTML = `
+                <img src="${imgUrl}" onerror="this.onerror=null;this.src='/images/placeholder.webp';" alt="${item.name || 'Product'}" class="w-14 h-14 object-contain rounded-md border border-slate-100 bg-slate-50 p-1" />
+                <div class="flex-1 space-y-1">
+                  <h4 class="text-xs font-bold text-slate-900 line-clamp-1">${item.name}</h4>
+                  <div class="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                    <span class="text-rose-600">₹ ${itemPrice}</span>
+                    ${itemDisc > 0 ? `<span class="text-slate-400 font-normal line-through text-[11px]">₹ ${itemMrp}</span>
+                    <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded">${itemDisc}% OFF</span>` : ''}
+                  </div>
                 </div>
-                <div class="text-[11px] text-slate-600">${Array.isArray(o.items) ? o.items.join(', ') : o.items}</div>
-                <div class="text-xs font-extrabold text-rose-600 pt-1 border-t border-slate-200">Total COD: ₹ ${o.total}</div>
-              </div>
-            `).join('');
-          }
-        };
-
-        window.toggleCartDrawer = function(open) {
-          const overlay = document.getElementById('cart-overlay');
-          const drawer = document.getElementById('cart-drawer');
-          if (!overlay || !drawer) return;
-          if (open) {
-            overlay.classList.remove('opacity-0', 'pointer-events-none');
-            overlay.style.opacity = '1';
-            overlay.style.pointerEvents = 'auto';
-            drawer.style.transform = 'translateX(0)';
-          } else {
-            overlay.classList.add('opacity-0', 'pointer-events-none');
-            overlay.style.opacity = '0';
-            overlay.style.pointerEvents = 'none';
-            drawer.style.transform = 'translateX(100%)';
-          }
-        };
-
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', window.loadCart);
-        } else {
-          window.loadCart();
+                <div class="flex items-center space-x-2 border border-slate-300 rounded px-2 py-1 text-xs">
+                  <button onclick="updateCartQty('${id}', -1)" class="font-bold cursor-pointer px-1 hover:text-rose-600">-</button>
+                  <span class="font-bold px-1">${item.qty}</span>
+                  <button onclick="updateCartQty('${id}', 1)" class="font-bold cursor-pointer px-1 hover:text-emerald-600">+</button>
+                </div>
+              `;
+              itemsList.appendChild(div);
+            }
+          });
         }
-      </script>
-    </div>
-  )}
+
+        const totalSavings = Math.max(0, totalMrp - totalPrice);
+
+        if (badge) badge.innerText = totalQty;
+        if (headerBadge) headerBadge.innerText = `${totalQty} ${totalQty === 1 ? 'ITEM' : 'ITEMS'}`;
+        if (totalPriceElem) totalPriceElem.innerText = `₹ ${totalPrice}`;
+        if (totalMrpElem) totalMrpElem.innerText = `₹ ${totalMrp}`;
+        if (savingsVal) savingsVal.innerText = `- ₹ ${totalSavings}`;
+        if (savingsRow) {
+          if (totalSavings > 0) savingsRow.classList.remove('hidden');
+          else savingsRow.classList.add('hidden');
+        }
+      };
+
+      window.placeRealWhatsAppOrder = async function() {
+        const keys = Object.keys(cart);
+        if (keys.length === 0) {
+          window.showShopToast('Empty Cart', 'Your cart is empty! Please add products to checkout.', '🛒');
+          return;
+        }
+
+        const nameInput = document.getElementById('checkout-name')?.value.trim() || 'Valued Customer';
+        const phoneInput = document.getElementById('checkout-phone')?.value.trim();
+        const addressInput = document.getElementById('checkout-address')?.value.trim() || 'Store Pickup';
+
+        if (!phoneInput) {
+          window.showShopToast('Missing Phone Number', 'Please enter your phone number to place order & track delivery!', '📱');
+          return;
+        }
+
+        let totalPrice = 0;
+        let itemLines = [];
+        keys.forEach(id => {
+          const item = cart[id];
+          totalPrice += item.price * item.qty;
+          itemLines.push(`- ${item.name} (Qty: ${item.qty}) = Rs. ${item.price * item.qty}`);
+        });
+
+        const orderId = `YF-${Math.floor(1000 + Math.random() * 9000)}`;
+        const newOrder = {
+          order_id: orderId,
+          customer_name: nameInput,
+          phone: phoneInput,
+          address: addressInput,
+          items: itemLines,
+          total: totalPrice,
+          timestamp: new Date().toLocaleString(),
+          status: 'Order Placed & Processing'
+        };
+
+        try {
+          await fetch('/api/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newOrder)
+          });
+        } catch (e) {
+          console.error('Error posting order to API:', e);
+        }
+
+        try {
+          let orders = JSON.parse(localStorage.getItem('yesfancy_orders') || '[]');
+          orders.unshift(newOrder);
+          localStorage.setItem('yesfancy_orders', JSON.stringify(orders));
+        } catch (e) {}
+
+        cart = {};
+        window.saveCart();
+
+        window.toggleCartDrawer(false);
+        window.toggleTrackDrawer(true);
+        const trackInput = document.getElementById('track-input');
+        if (trackInput) trackInput.value = phoneInput;
+        window.lookupOrderStatus();
+
+        window.showShopToast(
+          '🎉 Order Placed Successfully!',
+          `Order #${orderId} (₹ ${totalPrice}) has been sent directly to ${currentShopName}. You can track your order status live right here!`,
+          '🛍️'
+        );
+      };
+
+      window.showShopToast = function(title, message, icon = '✨') {
+        const toast = document.getElementById('shop-toast');
+        const titleEl = document.getElementById('toast-title');
+        const msgEl = document.getElementById('toast-message');
+        const iconEl = document.getElementById('toast-icon');
+
+        if (!toast) return;
+        if (titleEl) titleEl.innerText = title;
+        if (msgEl) msgEl.innerText = message;
+        if (iconEl) iconEl.innerText = icon;
+
+        toast.classList.remove('translate-y-20', 'opacity-0');
+        toast.classList.add('translate-y-0', 'opacity-100');
+
+        setTimeout(() => {
+          toast.classList.remove('translate-y-0', 'opacity-100');
+          toast.classList.add('translate-y-20', 'opacity-0');
+        }, 3500);
+      };
+
+      window.toggleTrackDrawer = function(open) {
+        const overlay = document.getElementById('track-overlay');
+        const drawer = document.getElementById('track-drawer');
+        if (open) {
+          overlay?.classList.remove('opacity-0', 'pointer-events-none');
+          drawer?.classList.remove('translate-x-full');
+        } else {
+          overlay?.classList.add('opacity-0', 'pointer-events-none');
+          drawer?.classList.add('translate-x-full');
+        }
+      };
+
+      window.lookupOrderStatus = async function() {
+        const phone = document.getElementById('track-input')?.value.trim();
+        const resultsBox = document.getElementById('track-results-box');
+        if (!phone || !resultsBox) return;
+
+        let orders = [];
+        try {
+          const res = await fetch('/api/orders');
+          const data = await res.json();
+          orders = (data.orders || []).filter(o => o.phone && o.phone.includes(phone));
+        } catch (e) {}
+
+        if (orders.length === 0) {
+          resultsBox.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs bg-slate-50 border border-dashed border-slate-300 rounded-lg">No active orders found for phone number ${phone}.</div>`;
+        } else {
+          resultsBox.innerHTML = orders.map(o => `
+            <div class="border border-slate-200 rounded-lg p-3 space-y-2 bg-slate-50 mb-2">
+              <div class="flex justify-between items-center text-xs font-bold">
+                <span>Order #${o.order_id}</span>
+                <span class="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded">${o.status}</span>
+              </div>
+              <div class="text-[11px] text-slate-600">${Array.isArray(o.items) ? o.items.join(', ') : o.items}</div>
+              <div class="text-xs font-extrabold text-rose-600 pt-1 border-t border-slate-200">Total COD: ₹ ${o.total}</div>
+            </div>
+          `).join('');
+        }
+      };
+
+      window.toggleCartDrawer = function(open) {
+        const overlay = document.getElementById('cart-overlay');
+        const drawer = document.getElementById('cart-drawer');
+        if (!overlay || !drawer) return;
+        if (open) {
+          overlay.classList.remove('opacity-0', 'pointer-events-none');
+          overlay.style.opacity = '1';
+          overlay.style.pointerEvents = 'auto';
+          drawer.style.transform = 'translateX(0)';
+        } else {
+          overlay.classList.add('opacity-0', 'pointer-events-none');
+          overlay.style.opacity = '0';
+          overlay.style.pointerEvents = 'none';
+          drawer.style.transform = 'translateX(100%)';
+        }
+      };
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', window.loadCart);
+      } else {
+        window.loadCart();
+      }
+    </script>
+  </div>
 
 </body>
 </html>

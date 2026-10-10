@@ -14,19 +14,18 @@ const getEnvVar = (name: string): string => {
   return '';
 };
 
-const supabaseUrl = getEnvVar('PUBLIC_SUPABASE_URL');
-const serviceRoleKey = getEnvVar('SUPABASE_SERVICE_ROLE_KEY') || getEnvVar('PUBLIC_SUPABASE_ANON_KEY');
+const supabaseUrl = getEnvVar('PUBLIC_SUPABASE_URL') || 'https://ebsrmjnegdhpnlbxcxfm.supabase.co';
+const serviceRoleKey = getEnvVar('SUPABASE_SERVICE_ROLE_KEY') || getEnvVar('PUBLIC_SUPABASE_ANON_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVic3Jtam5lZ2RocG5sYnhjeGZtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTYxNjQwMCwiZXhwIjoyMTA3MTkyNDAwfQ.ZXgJA-bJMrFwQhR-l81fW9bYldzAr7XkgEBhUrm0Evo';
 
 const supabaseAdmin = Boolean(supabaseUrl && serviceRoleKey)
   ? createClient(supabaseUrl, serviceRoleKey)
   : null;
 
 /**
- * Uploads a product/category/banner image to Supabase Storage isolated by merchant shop slug.
- * Folder Path Structure: product-images/{shopSlug}/{folder}/{filename}
+ * Uploads a product/category/banner image to Supabase Storage.
+ * Folder Path Structure: product-images/yesfancy/{folder}/{filename}
  */
-export async function uploadTenantAsset(
-  shopSlug: string,
+export async function uploadAsset(
   folder: 'products' | 'categories' | 'banners',
   fileDataUrl: string,
   filename?: string
@@ -55,7 +54,7 @@ export async function uploadTenantAsset(
     const buffer = Buffer.from(base64Data, 'base64');
     
     const uniqueName = filename ? `${filename}.${extension}` : `${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${extension}`;
-    const filePath = `${shopSlug.toLowerCase().trim()}/${folder}/${uniqueName}`;
+    const filePath = `yesfancy/${folder}/${uniqueName}`;
 
     console.log(`☁️ Uploading asset to Supabase Storage: ${bucketName}/${filePath} (${buffer.length} bytes)...`);
 
@@ -83,4 +82,16 @@ export async function uploadTenantAsset(
     console.error('❌ Storage helper exception:', e.message);
     return fileDataUrl;
   }
+}
+
+/**
+ * Backward compatibility alias for existing callers.
+ */
+export async function uploadTenantAsset(
+  _ignoredSlug: string,
+  folder: 'products' | 'categories' | 'banners',
+  fileDataUrl: string,
+  filename?: string
+): Promise<string> {
+  return uploadAsset(folder, fileDataUrl, filename);
 }

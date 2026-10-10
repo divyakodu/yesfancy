@@ -17,19 +17,13 @@ const categories = shop.categories || [];
 const logoImg = shop?.logo_animated_url || shop?.logo_url;
 const logoText = shop?.logo_text || shop?.name;
 
-const queryShop = Astro.url.searchParams.get('shop');
-const host = Astro.url.hostname;
-const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost');
-const activeShopSlug = queryShop || (isLocal && shop?.slug ? shop.slug : '');
-const storeHomeUrl = activeShopSlug ? `/?shop=${activeShopSlug}` : '/';
+const storeHomeUrl = '/';
 
 const getCatalogUrl = (catId?: string) => {
-  const base = '/catalog';
-  const params = new URLSearchParams();
-  if (catId && catId !== 'all') params.set('category', catId);
-  if (activeShopSlug) params.set('shop', activeShopSlug);
-  const qs = params.toString();
-  return qs ? `${base}?${qs}` : base;
+  if (catId && catId !== 'all') {
+    return `/catalog?category=${catId}`;
+  }
+  return '/catalog';
 };
 ---
 
@@ -74,7 +68,6 @@ const getCatalogUrl = (catId?: string) => {
       <div class="flex items-center space-x-3 sm:space-x-4 shrink-0 my-auto">
         <!-- Desktop Search Bar (Visible ONLY on Desktop ≥ 1024px) -->
         <form action="/catalog" method="GET" class="hidden lg:flex items-center relative">
-          {activeShopSlug && <input type="hidden" name="shop" value={activeShopSlug} />}
           <div class="relative flex items-center">
             <svg class="w-4 h-4 text-slate-800 absolute left-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -106,7 +99,6 @@ const getCatalogUrl = (catId?: string) => {
   <!-- 3. Mobile Search Bar Component (Inside Sticky Header, Never Truncated or Overlapped!) -->
   <div class="lg:hidden bg-slate-50 border-t border-slate-200 px-3 sm:px-4 py-2 shadow-2xs">
     <form action="/catalog" method="GET" class="flex items-center space-x-2">
-      {activeShopSlug && <input type="hidden" name="shop" value={activeShopSlug} />}
       <div class="relative flex-1 flex items-center">
         <svg class="w-4 h-4 text-slate-800 absolute left-3 pointer-events-none shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -228,7 +220,7 @@ const getCatalogUrl = (catId?: string) => {
 
     // 2. Fetch from API with safety fallback
     try {
-      const res = await fetch(`/api/orders?shop=yesfancy`);
+      const res = await fetch('/api/orders');
       if (res.ok) {
         const data = await res.json();
         if (data.orders && Array.isArray(data.orders)) {

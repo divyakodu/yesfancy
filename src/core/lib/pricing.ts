@@ -1,7 +1,7 @@
 /**
  * src/core/lib/pricing.ts
  * -----------------------
- * Centralized pricing calculations for Oorumart & YesFancy.
+ * Centralized pricing calculations for Yes Fancy.
  * Single source of truth for converting MRP and Discount % into effective selling prices.
  */
 

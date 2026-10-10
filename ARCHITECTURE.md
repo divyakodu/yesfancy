@@ -1,91 +1,64 @@
-# Oorumart (`oorumart.in`) - Dynamic Tenant Rendering Engine
+# Yes Fancy — Architecture Documentation
 
-## 1. How YAML Configs Turn into Live Storefronts
-
-Oorumart uses **Dynamic Runtime Edge Rendering** (the same architectural pattern used by Shopify and Wix). You do **NOT** need a build script to generate static code files for every shop. 
-
-Instead, **1 single renderer codebase** dynamically presents `yesfancy.oorumart.in`, `sarveshpan.oorumart.in`, or `bagammaflowers.oorumart.in` based on their YAML/JSON configuration.
+This document describes the decoupled, standalone architecture of **Yes Fancy** (`www.yesfancy.in`).
 
 ---
 
-## 2. Request Lifecycle Diagram
+## 1. System Architecture
 
 ```
-Buyer visits: https://yesfancy.oorumart.in
-                    |
-                    v
-    [ Edge Middleware (Cloudflare) ]
-    1. Extract host header -> "yesfancy"
-    2. Fetch tenant config (yesfancy.yaml or DB row)
-                    |
-                    v
-    [ Astro Template Renderer ]
-    1. Inject CSS Variables:
-       :root { --primary: #E94E77; --bg: #FAF7F2; }
-    2. Render Layout Components:
-       <AnnouncementBar text={config.announcement} />
-       <HeroCarousel items={config.carousels} />
-       <CategoryPills items={config.categories} />
-       <ProductGrid products={dbProducts} />
-                    |
-                    v
-    [ Instant HTML Response to Buyer (<0.8s LCP) ]
-```
-
----
-
-## 3. How the Code Interprets `yesfancy.yaml`
-
-Here is the exact code logic inside the Astro storefront template (`src/pages/index.astro`):
-
-```astro
----
-// 1. Read Subdomain from Request
-const host = Astro.request.headers.get('host') || '';
-const slug = host.split('.')[0]; // "yesfancy"
-
-// 2. Load Tenant Configuration (from DB or YAML file)
-const tenant = await getTenantConfig(slug); 
-const products = await getTenantProducts(tenant.id);
----
-
-<!-- 3. Dynamic Styling via CSS Variables -->
-<html style={`--primary: ${tenant.theme.primary}; --bg: ${tenant.theme.background};`}>
-  <head>
-    <title>{tenant.name}</title>
-  </head>
-  <body class="bg-[var(--bg)] font-sans">
-    
-    <!-- Dynamic Announcement Bar -->
-    <header class="bg-[var(--primary)] text-white text-center py-2">
-      {tenant.announcement_text}
-    </header>
-
-    <!-- Dynamic Hero Carousel -->
-    <HeroCarousel items={tenant.carousels.offer_banner} />
-
-    <!-- Dynamic Product Grid -->
-    <div class="grid grid-cols-2 gap-4 p-4">
-      {products.map(product => (
-        <ProductCard 
-          name={product.name} 
-          price={product.price} 
-          image={product.image}
-          primaryColor={tenant.theme.primary}
-        />
-      ))}
-    </div>
-
-    <!-- Dynamic Bottom Checkout Sheet -->
-    <CheckoutBar tenantPhone={tenant.phone} />
-  </body>
-</html>
+                    ┌─────────────────────────┐
+                    │      Cloudflare Edge    │
+                    │   (www.yesfancy.in)     │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │   Astro SSR Server      │
+                    │   (Cloudflare Pages)    │
+                    └────────────┬────────────┘
+                                 │
+                     ┌───────────┴───────────┐
+                     │                       │
+                     ▼                       ▼
+          ┌─────────────────────┐ ┌──────────────────────┐
+          │ Supabase Cloud DB   │ │ Supabase Storage     │
+          │ (ebsrmjnegdhpnlbxc) │ │ (product-images)     │
+          │                     │ │                      │
+          │ - store_settings    │ │ - yesfancy/products/ │
+          │ - categories        │ │ - yesfancy/categ...  │
+          │ - products          │ │ - yesfancy/banners/  │
+          │ - hero_slides       │ └──────────────────────┘
+          │ - orders            │
+          └─────────────────────┘
 ```
 
 ---
 
-## 4. Key Advantages of Dynamic Runtime Rendering
+## 2. Database Schema (Single-Store)
 
-1. **Instant Updates**: When a shopkeeper changes a price, adds a banner, or updates shop colors in their dashboard, it updates the YAML/DB row. The shop updates **INSTANTLY** without any re-compilation or re-deployment!
-2. **Zero Code Duplication**: You maintain 1 single Astro codebase. If you fix a bug or add a new cart feature, all 500 shops get the improvement immediately.
-3. **Ultra-Low Storage**: 500 shops take 0 extra disk space. They are just rows in a database or YAML files in storage.
+All tables are strictly single-store without multi-tenant foreign keys or tenant scaffolding:
+
+| Table | Purpose | Primary Key | Key Columns |
+| :--- | :--- | :--- | :--- |
+| `store_settings` | Global store branding & contact | `id` ('default') | `name`, `phone`, `tagline`, `logo_url`, `primary_color`, `secondary_color` |
+| `categories` | Store categories | `id` | `label`, `tag`, `image_url`, `sort_order` |
+| `products` | Catalog items | `id` | `name`, `mrp`, `discount`, `price`, `image_url`, `category_id`, `stock`, `is_active` |
+| `hero_slides` | Homepage banners | `id` | `title`, `subtitle`, `cta_link`, `image_url`, `sort_order` |
+| `orders` | Customer orders | `order_id` | `customer_name`, `phone`, `address`, `items`, `total`, `status` |
+
+---
+
+## 3. Key Design Principles
+
+1. **Zero Multi-Tenant Indirection**: No `shop_id`, `shop_slug`, or owner discovery loops. The application operates solely on Yes Fancy data.
+2. **Clean URL Design**:
+   - Homepage: `/`
+   - Full Catalog: `/catalog`
+   - Category Filter: `/catalog?category=fashion`
+   - Product Details: `/product/[id]`
+   - Store Admin: `/admin`
+3. **Discount-First Pricing**:
+   $$\text{Selling Price} = \text{round}\left(\text{MRP} \times \left(1 - \frac{\text{Discount}}{100}\right)\right)$$
+4. **Client State Resilience**:
+   Cart and order history are persisted in `localStorage` under `yesfancy_cart` and `yesfancy_orders`, with migration fallbacks for users transitioning from the legacy multi-tenant keys.

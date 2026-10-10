@@ -39,7 +39,7 @@ const { shopSlug, items = defaultItems } = Astro.props;
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
     {items.slice(0, 2).map((item) => (
       <a 
-        href={`/catalog?shop=${shopSlug}&tag=${item.tagId}`} 
+        href={`/catalog?category=${item.tagId}`} 
         class="group relative block aspect-[4/5] sm:aspect-[4/5] w-full overflow-hidden bg-slate-100 no-underline shadow-sm hover:shadow-md transition-shadow"
       >
         <!-- Lifestyle Image Banner with Subtle Zoom -->

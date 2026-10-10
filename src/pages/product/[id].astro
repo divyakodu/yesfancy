@@ -4,32 +4,16 @@ export const prerender = false;
 import '@styles/global.css';
 import StoreHeader from '@components/StoreHeader.astro';
 import StoreFooter from '@components/StoreFooter.astro';
-import { getShopConfigAsync, getAllShopsConfigAsync } from '@lib/getShopConfig';
+import { getStoreConfigAsync } from '@lib/getShopConfig';
 import { getSellingPrice } from '@core/lib/pricing';
 
 const { id } = Astro.params;
-const url = new URL(Astro.request.url);
-const host = Astro.request.headers.get('host') || '';
-const queryShop = url.searchParams.get('shop');
 
-const hostParts = host.split(':')[0].split('.');
-const subdomain = (hostParts.length > 2 && hostParts[0] !== 'www') ? hostParts[0] : null;
-
-const targetSlug = queryShop || subdomain;
-let shopData = targetSlug ? await getShopConfigAsync(targetSlug) : null;
-
-// Auto-discover which merchant owns product 'id' if no ?shop= parameter was given!
-if (!shopData) {
-  const allShops = await getAllShopsConfigAsync();
-  const ownerShop = allShops.find((s: any) => s.products.some((p: any) => p.id === id));
-  if (ownerShop) {
-    shopData = { shop: ownerShop };
-  } else {
-    shopData = { shop: allShops[0] };
-  }
+const shop = await getStoreConfigAsync();
+if (!shop) {
+  throw new Error('Failed to load store configuration from database.');
 }
 
-const { shop } = shopData;
 const { products: rawProducts = [], categories = [], theme } = shop;
 const primaryColor = theme?.primary_color || '#581C87';
 
@@ -56,9 +40,8 @@ const productMrp = Number(product?.mrp || product?.price || 0);
 const productDiscount = product?.discount !== undefined ? Number(product.discount) : (product?.price && productMrp > product.price ? Math.round(((productMrp - product.price) / productMrp) * 100) : 0);
 const sellingPrice = getSellingPrice(productMrp, productDiscount);
 
-const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
-const storeHomeUrl = queryShop ? `/?shop=${queryShop}` : (isLocal && shop?.slug ? `/?shop=${shop.slug}` : '/');
-const storeCatalogUrl = queryShop ? `/catalog?shop=${queryShop}` : (isLocal && shop?.slug ? `/catalog?shop=${shop.slug}` : '/catalog');
+const storeHomeUrl = '/';
+const storeCatalogUrl = '/catalog';
 ---
 
 <!DOCTYPE html>
@@ -92,18 +75,7 @@ const storeCatalogUrl = queryShop ? `/catalog?shop=${queryShop}` : (isLocal && s
 </head>
 <body class="min-h-screen text-slate-800 bg-white relative pb-16 sm:pb-0">
 
-  <!-- Tenant Switcher & Debug Bar -->
-  <div class="bg-slate-900 text-slate-200 text-[11px] font-medium py-1 px-4 flex items-center justify-between border-b border-slate-800 select-none">
-    <div class="flex items-center space-x-2">
-      <span class="bg-emerald-500 w-2 h-2 rounded-full animate-pulse"></span>
-      <span>Storefront | <strong class="text-white uppercase">{shop.name}</strong></span>
-    </div>
-    <div class="flex items-center space-x-3 text-slate-300">
-      <a href={`/catalog?shop=${shop.slug}`} class="hover:text-white no-underline text-purple-300 font-bold">🛍️ View Full Catalog</a>
-      <button onclick="clearFullCart(); alert('Cart has been reset to 0 items!');" class="hover:text-rose-300 text-rose-400 font-bold cursor-pointer bg-transparent border-0">🗑️ Reset Cart</button>
-      <a href={`/?shop=${shop.slug}`} class="hover:text-white no-underline text-slate-300 font-bold">🏠 Store Home</a>
-    </div>
-  </div>
+  <!-- Store Header Component -->
 
   <!-- 100% Generic Reusable Store Header Component -->
   <StoreHeader shop={shop} primaryColor={primaryColor} />
@@ -240,7 +212,7 @@ const storeCatalogUrl = queryShop ? `/catalog?shop=${queryShop}` : (isLocal && s
             const pShopSlug = shop?.slug || queryShop || '';
 
             return (
-              <div class="w-44 sm:w-56 shrink-0 space-y-2 group cursor-pointer" onclick={`window.location.href='/product/${p.id}${pShopSlug ? `?shop=${pShopSlug}` : ''}'`}>
+              <div class="w-44 sm:w-56 shrink-0 space-y-2 group cursor-pointer" onclick={`window.location.href='/product/${p.id}'`}>
                 <div class="relative aspect-square overflow-hidden bg-[#F5F3EE] rounded-lg">
                   <img src={p.image_url} alt={p.name} class="w-full h-full object-contain p-2 mix-blend-multiply group-hover:scale-105 transition-transform duration-300" />
                   {pDisc > 0 && (
@@ -492,10 +464,11 @@ const storeCatalogUrl = queryShop ? `/catalog?shop=${queryShop}` : (isLocal && s
 
     window.loadCart = function() {
       try {
-        localStorage.removeItem('yesfancy_cart');
-        localStorage.removeItem('oorumart_cart');
-
-        const saved = localStorage.getItem(`oorumart_cart_${currentShopSlug}`);
+        let saved = localStorage.getItem('yesfancy_cart');
+        if (!saved) {
+          saved = localStorage.getItem('oorumart_cart_yesfancy');
+          if (saved) localStorage.setItem('yesfancy_cart', saved);
+        }
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -510,7 +483,7 @@ const storeCatalogUrl = queryShop ? `/catalog?shop=${queryShop}` : (isLocal && s
     };
 
     window.saveCart = function() {
-      try { localStorage.setItem(`oorumart_cart_${currentShopSlug}`, JSON.stringify(cart)); } catch (e) {}
+      try { localStorage.setItem('yesfancy_cart', JSON.stringify(cart)); } catch (e) {}
       window.renderCart();
       updatePageUI();
     };
@@ -709,9 +682,9 @@ const storeCatalogUrl = queryShop ? `/catalog?shop=${queryShop}` : (isLocal && s
       }
 
       try {
-        let orders = JSON.parse(localStorage.getItem(`oorumart_orders_${currentShopSlug}`) || '[]');
+        let orders = JSON.parse(localStorage.getItem('yesfancy_orders') || '[]');
         orders.unshift(newOrder);
-        localStorage.setItem(`oorumart_orders_${currentShopSlug}`, JSON.stringify(orders));
+        localStorage.setItem('yesfancy_orders', JSON.stringify(orders));
       } catch (e) {}
 
       cart = {};
