@@ -7,6 +7,7 @@ import StoreFooter from '@components/StoreFooter.astro';
 import { getStoreConfigAsync } from '@lib/getShopConfig';
 import { getSellingPrice } from '@core/lib/pricing';
 import { STORE_CONFIG } from '@core/config/store.config';
+import { isStorefrontProduct } from '@core/lib/productFilter';
 
 const { id } = Astro.params;
 
@@ -19,7 +20,7 @@ const { products: rawProducts = [], categories = [], theme } = shop;
 const primaryColor = theme?.primary_color || '#581C87';
 
 // Strict active products with valid images for customer storefront
-const activeProducts = (rawProducts || []).filter((p: any) => p.is_active !== false && p.image_url);
+const activeProducts = (rawProducts || []).filter(isStorefrontProduct);
 
 // Product lookup: strictly prefer active product, fallback to first active product
 const product = activeProducts.find((p: any) => p.id === id) 

@@ -6,6 +6,7 @@ import { getStoreConfigAsync } from '@lib/getShopConfig';
 import { getTemplateComponent } from '@lib/resolveTemplate';
 import StoreHeader from '@components/StoreHeader.astro';
 import StoreFooter from '@components/StoreFooter.astro';
+import { isStorefrontProduct } from '@core/lib/productFilter';
 
 // Prevent serving stale product lists from browser or CDN cache
 Astro.response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
@@ -20,7 +21,7 @@ if (!shop) {
 }
 
 const { theme, products: rawProducts = [], categories = [] } = shop;
-const products = (rawProducts || []).filter((p: any) => p.is_active !== false);
+const products = (rawProducts || []).filter(isStorefrontProduct);
 const primaryColor = theme?.primary_color || '#581C87';
 const secondaryColor = theme?.secondary_color || '#F8FAFC';
 const accentColor = theme?.accent_color || '#E11D48';

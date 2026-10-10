@@ -50,18 +50,21 @@ const shopSlug = shop?.slug || 'yesfancy';
         data-hero-slide={idx}
         class={`absolute inset-0 w-full h-full transition-opacity duration-1000 ease-in-out flex items-center ${idx === 0 ? 'opacity-100 z-10 pointer-events-auto' : 'opacity-0 z-0 pointer-events-none'}`}
       >
-        <!-- Full-Width High-Resolution Backdrop Image (Zero Text Embedded inside Image!) -->
-        <img 
-          src={slide.image_url} 
-          alt={slide.title || 'Hero Offer Poster'} 
-          class="absolute inset-0 w-full h-full object-cover object-center brightness-90 contrast-105" 
-        />
-        
-        <!-- Subtle Dark Vignette Overlay for Readability -->
-        <div class="absolute inset-0 bg-gradient-to-r from-slate-950/85 via-slate-950/45 to-transparent"></div>
+        <!-- Clickable Full-Slide Backdrop Link -->
+        <a href={slideLink} class="absolute inset-0 w-full h-full block cursor-pointer z-0 group" aria-label={`View ${slide.title} collection`}>
+          <!-- Full-Width High-Resolution Backdrop Image -->
+          <img 
+            src={slide.image_url} 
+            alt={slide.title || 'Hero Offer Poster'} 
+            class="absolute inset-0 w-full h-full object-cover object-center brightness-90 contrast-105 group-hover:scale-[1.01] transition-transform duration-700" 
+          />
+          
+          <!-- Subtle Dark Vignette Overlay for Readability -->
+          <div class="absolute inset-0 bg-gradient-to-r from-slate-950/85 via-slate-950/45 to-transparent"></div>
+        </a>
 
         <!-- Foreground Content Container -->
-        <div class="relative max-w-7xl mx-auto px-6 sm:px-12 py-20 w-full z-10">
+        <div class="relative max-w-7xl mx-auto px-6 sm:px-12 py-20 w-full z-10 pointer-events-none">
           <div class="max-w-2xl space-y-6 text-left">
             
             <!-- Brand Tag Badge -->
@@ -80,7 +83,7 @@ const shopSlug = shop?.slug || 'yesfancy';
             </p>
 
             <!-- CTA Button Linked to Tag Filter -->
-            <div class="pt-4">
+            <div class="pt-4 pointer-events-auto">
               <a 
                 href={slideLink} 
                 class="inline-flex items-center space-x-3 bg-white text-slate-950 font-extrabold text-xs sm:text-sm uppercase px-8 py-4 tracking-widest shadow-2xl hover:bg-slate-900 hover:text-white transition-all duration-200 border-2 border-white no-underline group"

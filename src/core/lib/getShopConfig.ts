@@ -152,18 +152,14 @@ export async function getStoreConfigAsync(): Promise<StoreConfig | null> {
       .order('sort_order', { ascending: true });
 
     const heroSlides = (dbSlides && dbSlides.length > 0)
-      ? dbSlides.map(s => ({
-          ...s,
-          link: s.cta_link?.startsWith('/') ? s.cta_link : `/catalog?category=${s.cta_link || 'all'}`
-        }))
+      ? dbSlides.map(s => {
+          const rawLink = s.link || (s.tag_id ? `/catalog?category=${s.tag_id}` : '/catalog?category=all');
+          return {
+            ...s,
+            link: rawLink.startsWith('/') ? rawLink : `/catalog?category=${rawLink}`
+          };
+        })
       : defaultOfferSlides;
-
-    const defaultTicker = [
-      { label: "Easy Return", icon: "return" },
-      { label: "Quality Assured", icon: "quality" },
-      { label: "Satisfied Customers", icon: "heart" },
-      { label: "Express Dispatch", icon: "dispatch" }
-    ];
 
     return {
       id: STORE_CONFIG.id,
@@ -190,7 +186,7 @@ export async function getStoreConfigAsync(): Promise<StoreConfig | null> {
       categories: categories,
       products: (products || []).map((p: any) => ({
         ...p,
-        image_url: p.image_url && p.image_url.trim().length > 0 ? p.image_url : '/images/placeholder.webp'
+        image_url: typeof p.image_url === 'string' ? p.image_url.trim() : ''
       })),
       carousels: {
         hero: heroSlides
