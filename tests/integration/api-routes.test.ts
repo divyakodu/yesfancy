@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { GET as getOrders, POST as createOrder } from '../../src/pages/api/orders';
+import { GET as getOrders, POST as createOrder, PATCH as updateOrderStatus } from '../../src/pages/api/orders';
 import { POST as createProduct, DELETE as deleteProduct } from '../../src/pages/api/products';
 import { POST as createCategory, DELETE as deleteCategory } from '../../src/pages/api/categories';
 import { supabase } from '../../src/core/lib/supabase';
@@ -44,6 +44,53 @@ describe('Gate 3: Single-Store API Contracts (Integration Tests)', () => {
     assert.equal(body.order?.order_id, testOrderId);
 
     // Clean up test order
+    if (supabase) {
+      await supabase.from('orders').delete().eq('order_id', testOrderId);
+    }
+  });
+
+  it('PATCH /api/orders should update the status of an existing order', async () => {
+    const testOrderId = `TEST-PATCH-${Date.now()}`;
+    const payload = {
+      order_id: testOrderId,
+      customer_name: 'Status Test Bot',
+      phone: '8888888888',
+      address: 'Test Suite Suite 2',
+      items: ['- Test Item 1 (Qty: 1) = Rs. 200'],
+      total: 200
+    };
+
+    // Create order first
+    const createCtx: any = {
+      request: new Request('http://localhost:4321/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+    };
+    await createOrder(createCtx);
+
+    // Now update status via PATCH
+    const patchCtx: any = {
+      request: new Request('http://localhost:4321/api/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: testOrderId,
+          status: 'Dispatched / Out for Delivery'
+        })
+      })
+    };
+    const patchRes = await updateOrderStatus(patchCtx);
+    assert.equal(patchRes.status, 200);
+
+    const patchBody = await patchRes.json();
+    assert.equal(patchBody.success, true);
+    if (patchBody.order) {
+      assert.equal(patchBody.order.status, 'Dispatched / Out for Delivery');
+    }
+
+    // Clean up
     if (supabase) {
       await supabase.from('orders').delete().eq('order_id', testOrderId);
     }

@@ -1513,6 +1513,8 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
       const listElem = document.getElementById('admin-orders-list');
       const badgeElem = document.getElementById('admin-orders-count-badge');
 
+      window.lastOrdersList = orders;
+
       if (badgeElem) badgeElem.innerText = orders.length;
       if (!listElem) return;
 
@@ -1525,32 +1527,186 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
           </div>
         `;
       } else {
-        listElem.innerHTML = orders.map((order, idx) => `
-          <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs space-y-3">
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-              <div class="space-y-0.5">
+        const statusColors = {
+          'Order Placed & Processing': 'bg-amber-100 text-amber-800 border-amber-200',
+          'Order Confirmed & Packing': 'bg-blue-100 text-blue-800 border-blue-200',
+          'Dispatched / Out for Delivery': 'bg-purple-100 text-purple-800 border-purple-200',
+          'Delivered': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+          'Cancelled': 'bg-rose-100 text-rose-800 border-rose-200'
+        };
+
+        const availableStatuses = [
+          'Order Placed & Processing',
+          'Order Confirmed & Packing',
+          'Dispatched / Out for Delivery',
+          'Delivered',
+          'Cancelled'
+        ];
+
+        listElem.innerHTML = orders.map((order) => {
+          const badgeClass = statusColors[order.status] || 'bg-slate-100 text-slate-800 border-slate-200';
+          const itemsArr = Array.isArray(order.items) ? order.items : [order.items];
+
+          // Parse string lines like "- Item Name (Qty: 1) = Rs. 299" into structured row elements
+          const itemRowsHtml = itemsArr.map(itemStr => {
+            const str = String(itemStr || '').replace(/^-\s*/, '');
+            const match = str.match(/^(.*?)\s*\(Qty:\s*(\d+)\)\s*(?:=\s*(?:Rs\.?\s*)?(\d+))?$/i);
+            if (match) {
+              const name = match[1].trim();
+              const qty = match[2];
+              const price = match[3] ? `₹ ${match[3]}` : '—';
+              return `
+                <tr class="hover:bg-slate-50/50">
+                  <td class="p-2.5 font-bold text-slate-800">${name}</td>
+                  <td class="p-2.5 text-center font-bold text-slate-600"><span class="bg-slate-100 px-2 py-0.5 rounded text-[11px]">${qty}</span></td>
+                  <td class="p-2.5 text-right font-black text-slate-900">${price}</td>
+                </tr>
+              `;
+            } else {
+              return `
+                <tr class="hover:bg-slate-50/50">
+                  <td colspan="2" class="p-2.5 font-bold text-slate-800">${str}</td>
+                  <td class="p-2.5 text-right font-black text-slate-900">—</td>
+                </tr>
+              `;
+            }
+          }).join('');
+
+          return `
+          <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs space-y-4 hover:border-slate-300 transition-colors">
+            
+            <!-- 1. Header: Order ID, Timestamp & Interactive Status -->
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
                 <div class="flex items-center space-x-2">
-                  <span class="font-black text-slate-900 text-sm">Order #${order.order_id}</span>
-                  <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">${order.status}</span>
+                  <span class="font-black text-slate-900 text-base tracking-wide">Order #${order.order_id}</span>
+                  <span class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border ${badgeClass}">${order.status}</span>
                 </div>
-                <div class="text-xs font-bold text-slate-700">Customer: ${order.customer_name || 'Customer'} (📱 ${order.phone})</div>
-                <div class="text-[11px] text-slate-400">Delivery Address: ${order.address || 'Store Pickup'}</div>
+                <div class="text-[11px] text-slate-400 font-medium mt-0.5">
+                  📅 ${order.created_at ? new Date(order.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'Order Active'}
+                </div>
+              </div>
+
+              <!-- Interactive Status Dropdown -->
+              <div class="flex items-center space-x-2">
+                <span class="text-[11px] font-extrabold uppercase text-slate-400">Update Status:</span>
+                <select 
+                  onchange="window.updateOrderStatus('${order.order_id}', this.value)" 
+                  class="px-2.5 py-1.5 border border-slate-300 rounded font-bold text-xs bg-slate-50 hover:bg-slate-100 text-slate-900 focus:outline-none focus:border-slate-900 cursor-pointer transition-colors"
+                >
+                  ${availableStatuses.map(st => `<option value="${st}" ${order.status === st ? 'selected' : ''}>${st}</option>`).join('')}
+                </select>
               </div>
             </div>
 
-            <div class="text-xs text-slate-600 space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-100">
-              <div class="font-bold text-slate-800 text-[11px] uppercase tracking-wider mb-1">Items Ordered:</div>
-              ${Array.isArray(order.items) ? order.items.map((i) => `<div>${i}</div>`).join('') : `<div>${order.items}</div>`}
-              <div class="pt-2 border-t border-slate-200 mt-2 flex justify-between items-center font-bold text-slate-900">
-                <span>Total COD Amount: <span class="text-rose-600">₹ ${order.total}</span></span>
-                <a href="https://wa.me/91${order.phone}?text=${encodeURIComponent(`Hi ${order.customer_name || 'Customer'}, update on Order #${order.order_id} at ${currentShop.name}: Status is "${order.status}".`)}" target="_blank" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs no-underline font-bold">
-                  💬 Direct WhatsApp Chat
-                </a>
+            <!-- 2. Structured Customer & Address Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200/60 space-y-1">
+                <div class="font-extrabold text-[10px] uppercase tracking-wider text-slate-400">👤 Customer Details</div>
+                <div class="font-bold text-slate-900 text-sm">${order.customer_name || 'Customer'}</div>
+                <div class="flex items-center gap-2 pt-0.5">
+                  <a href="tel:+91${order.phone}" class="text-slate-600 hover:text-slate-900 font-mono text-xs font-bold no-underline">📞 +91 ${order.phone}</a>
+                  <span class="text-slate-300">|</span>
+                  <a href="https://wa.me/91${order.phone}" target="_blank" class="text-emerald-700 hover:underline font-bold text-[11px]">Chat on WhatsApp</a>
+                </div>
+              </div>
+
+              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200/60 space-y-1">
+                <div class="font-extrabold text-[10px] uppercase tracking-wider text-slate-400">📍 Delivery / Pickup Address</div>
+                <div class="text-slate-700 leading-relaxed font-medium">${order.address || 'Store Pickup'}</div>
               </div>
             </div>
+
+            <!-- 3. Structured Items Receipt Table -->
+            <div class="border border-slate-200 rounded-lg overflow-hidden bg-white">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-100 text-slate-600 font-extrabold text-[10px] uppercase tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th class="p-2.5">Item Description</th>
+                    <th class="p-2.5 text-center w-20">Quantity</th>
+                    <th class="p-2.5 text-right w-28">Amount</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  ${itemRowsHtml}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 4. Footer: Total Amount & Rich WhatsApp Button -->
+            <div class="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-100">
+              <div class="text-xs font-bold text-slate-700">
+                Total Payable (COD): <span class="text-rose-600 font-extrabold text-base ml-1">₹ ${order.total}</span>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button 
+                  onclick="window.sendRichWhatsAppReceipt('${order.order_id}')" 
+                  class="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded font-bold text-xs flex items-center space-x-1.5 shadow-xs cursor-pointer transition-colors"
+                >
+                  <span>💬 Send WhatsApp Order Receipt</span>
+                </button>
+              </div>
+            </div>
+
           </div>
-        `).join('');
+          `;
+        }).join('');
       }
+    };
+
+    window.updateOrderStatus = async function(orderId, newStatus) {
+      if (!currentShop) return;
+      try {
+        const res = await fetch('/api/orders', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: orderId, status: newStatus })
+        });
+        const data = await res.json();
+        if (data.success) {
+          window.showToast('Order Status Updated', `Order #${orderId} is now "${newStatus}"!`, '📦');
+          window.loadAdminOrders(true);
+        } else {
+          window.showToast('Error', data.error || 'Failed to update order status.', '❌');
+        }
+      } catch (err) {
+        console.error('Update order status error:', err);
+        window.showToast('Error', 'Failed to update order status.', '❌');
+      }
+    };
+
+    window.sendRichWhatsAppReceipt = function(orderId) {
+      if (!currentShop) return;
+      const order = (window.lastOrdersList || []).find(o => o.order_id === orderId);
+      if (!order) {
+        // Fallback fetch if not stored
+        window.open(`https://wa.me/91?text=${encodeURIComponent(`Hi, update regarding Order #${orderId} at ${currentShop.name}.`)}`, '_blank');
+        return;
+      }
+
+      const itemsArr = Array.isArray(order.items) ? order.items : [order.items];
+      const formattedItems = itemsArr.map(item => `• ${String(item).replace(/^-\s*/, '')}`).join('\n');
+
+      const message = 
+`🛍️ *${currentShop.name} — Order Update*
+━━━━━━━━━━━━━━━━━━━━
+Order ID: *#${order.order_id}*
+Status: *${order.status}*
+
+👤 *Customer:* ${order.customer_name}
+📍 *Delivery Address:* ${order.address || 'Store Pickup'}
+
+📦 *Items Ordered:*
+${formattedItems}
+
+💰 *Total Payable (COD):* *₹ ${order.total}*
+━━━━━━━━━━━━━━━━━━━━
+🚚 Expected Delivery: Fast Express Dispatch
+❓ Need assistance? Reply directly to this WhatsApp message!`;
+
+      const cleanPhone = (order.phone || '').replace(/\D/g, '');
+      const waUrl = `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank');
     };
 
     window.compressImageFile = function(file, callback) {

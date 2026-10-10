@@ -54,3 +54,33 @@ export const POST: APIRoute = async ({ request }) => {
     return new Response(JSON.stringify({ error: e.message }), { status: 500 });
   }
 };
+
+export const PATCH: APIRoute = async ({ request }) => {
+  try {
+    const body = await request.json();
+    const { order_id, status } = body;
+
+    if (!order_id || !status) {
+      return new Response(JSON.stringify({ error: 'Missing order_id or status' }), { status: 400 });
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ status })
+        .eq('order_id', order_id)
+        .select()
+        .single();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+      }
+
+      return new Response(JSON.stringify({ success: true, order: data }), { status: 200 });
+    }
+
+    return new Response(JSON.stringify({ success: true, order_id, status }), { status: 200 });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+  }
+};
