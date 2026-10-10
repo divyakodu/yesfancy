@@ -122,4 +122,19 @@ describe('Gate 3: Single-Store API Contracts (Integration Tests)', () => {
     const deleteBody = await deleteRes.json();
     assert.equal(deleteBody.success, true);
   });
+
+  it('STORE_CONFIG and getStoreConfigAsync should expose standardized phone 919014838640', async () => {
+    const { STORE_CONFIG } = await import('../../src/core/config/store.config');
+    const { getStoreConfigAsync } = await import('../../src/core/lib/getShopConfig');
+
+    assert.equal(STORE_CONFIG.contact.phone, '919014838640');
+    assert.equal(STORE_CONFIG.contact.whatsappNumber, '919014838640');
+    assert.equal(STORE_CONFIG.contact.displayPhone, '+91 9014838640');
+    assert.equal(STORE_CONFIG.contact.placeholderPhone, '9014838640');
+
+    const shop = await getStoreConfigAsync();
+    assert.ok(shop, 'shop config must not be null');
+    assert.equal(shop.phone, '919014838640');
+  });
 });
+

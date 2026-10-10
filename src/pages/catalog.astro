@@ -6,6 +6,7 @@ import ProductCard from '@components/ProductCard.astro';
 import StoreHeader from '@components/StoreHeader.astro';
 import StoreFooter from '@components/StoreFooter.astro';
 import { getStoreConfigAsync } from '@lib/getShopConfig';
+import { STORE_CONFIG } from '@core/config/store.config';
 
 // Prevent serving stale product lists from browser or CDN cache
 Astro.response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
@@ -302,7 +303,7 @@ if (totalPages <= 7) {
           <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-900">Customer Delivery Info</h4>
           <div class="space-y-2">
             <input id="checkout-name" type="text" placeholder="Enter Full Name (e.g. Divya Kodukula)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
-            <input id="checkout-phone" type="text" placeholder="Enter Phone Number (e.g. 8197921458)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
+            <input id="checkout-phone" type="text" placeholder={`Enter Phone Number (e.g. ${STORE_CONFIG.contact.placeholderPhone})`} class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
             <input id="checkout-address" type="text" placeholder="Enter Delivery Address / Store Pickup" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
           </div>
         </div>

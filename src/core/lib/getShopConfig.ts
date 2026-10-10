@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { STORE_CONFIG } from '../config/store.config';
 
 function getSupabaseClient() {
   const url = (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.PUBLIC_SUPABASE_URL : null) 
@@ -165,25 +166,25 @@ export async function getStoreConfigAsync(): Promise<StoreConfig | null> {
     ];
 
     return {
-      id: 'yesfancy',
-      slug: 'yesfancy',
-      name: settings?.name || 'Yes Fancy',
-      tagline: settings?.tagline || 'Curated Fancy Gifts, Toys, Games & Novelties',
-      category: 'Gifts & Toys',
-      template: 'GiftShopTemplate1',
-      phone: settings?.phone || '919014838640',
-      announcement_text: settings?.announcement_text || 'FREE SHIPPING ON ORDERS ABOVE ₹999 | EXPRESS STORE PICKUP',
-      logo_url: settings?.logo_url || '/images/yes_fancy_icon_transparent.png',
-      logo_animated_url: settings?.logo_animated_url || '/images/yes_fancy_icon_animated.gif',
-      logo_text: settings?.logo_text || 'Yes Fancy',
-      features_ticker: settings?.features_ticker || defaultTicker,
+      id: STORE_CONFIG.id,
+      slug: STORE_CONFIG.slug,
+      name: settings?.name || STORE_CONFIG.name,
+      tagline: settings?.tagline || STORE_CONFIG.tagline,
+      category: STORE_CONFIG.category,
+      template: STORE_CONFIG.template,
+      phone: settings?.phone || STORE_CONFIG.contact.phone,
+      announcement_text: settings?.announcement_text || STORE_CONFIG.announcement.text,
+      logo_url: settings?.logo_url || STORE_CONFIG.branding.logoUrl,
+      logo_animated_url: settings?.logo_animated_url || STORE_CONFIG.branding.logoAnimatedUrl,
+      logo_text: settings?.logo_text || STORE_CONFIG.branding.logoText,
+      features_ticker: settings?.features_ticker || STORE_CONFIG.featuresTicker,
       hero_slides: heroSlides,
       theme: {
-        primary_color: settings?.primary_color || '#581C87',
-        secondary_color: settings?.secondary_color || '#D4AF37',
-        accent_color: settings?.accent_color || '#E11D48',
-        font_title: settings?.font_title || 'Plus Jakarta Sans',
-        font_body: settings?.font_body || 'Plus Jakarta Sans'
+        primary_color: settings?.primary_color || STORE_CONFIG.theme.primaryColor,
+        secondary_color: settings?.secondary_color || STORE_CONFIG.theme.secondaryColor,
+        accent_color: settings?.accent_color || STORE_CONFIG.theme.accentColor,
+        font_title: settings?.font_title || STORE_CONFIG.theme.fontTitle,
+        font_body: settings?.font_body || STORE_CONFIG.theme.fontBody
       },
       tags: categories,
       categories: categories,
