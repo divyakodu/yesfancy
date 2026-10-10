@@ -1,0 +1,42 @@
+# dependencies
+/node_modules
+/.pnpm-store
+
+# heavy media dumps
+/public/images/catalog_extracted
+/catalog_images
+/creative_inspirations
+
+# build output
+/dist
+/.astro
+
+# environment variables
+.env
+.env.*
+!.env.example
+
+# logs & cache
+/logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.tmp
+/.npm
+/tmp
+
+# OS & IDE files
+.DS_Store
+.vscode/
+.idea/
+
+# Wrangler & CLI caches
+.wrangler/
+.gemini/
+/data/
+/experiments/
+__pycache__/
+*.pyc
+/scripts/extracted_images/
+

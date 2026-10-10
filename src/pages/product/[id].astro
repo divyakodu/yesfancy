@@ -1,0 +1,736 @@
+---
+export const prerender = false;
+
+import '@styles/global.css';
+import StoreHeader from '@components/StoreHeader.astro';
+import StoreFooter from '@components/StoreFooter.astro';
+import { getShopConfigAsync, getAllShopsConfigAsync } from '@lib/getShopConfig';
+import { getSellingPrice } from '@core/lib/pricing';
+
+const { id } = Astro.params;
+const url = new URL(Astro.request.url);
+const host = Astro.request.headers.get('host') || '';
+const queryShop = url.searchParams.get('shop');
+
+const hostParts = host.split(':')[0].split('.');
+const subdomain = (hostParts.length > 2 && hostParts[0] !== 'www') ? hostParts[0] : null;
+
+const targetSlug = queryShop || subdomain;
+let shopData = targetSlug ? await getShopConfigAsync(targetSlug) : null;
+
+// Auto-discover which merchant owns product 'id' if no ?shop= parameter was given!
+if (!shopData) {
+  const allShops = await getAllShopsConfigAsync();
+  const ownerShop = allShops.find((s: any) => s.products.some((p: any) => p.id === id));
+  if (ownerShop) {
+    shopData = { shop: ownerShop };
+  } else {
+    shopData = { shop: allShops[0] };
+  }
+}
+
+const { shop } = shopData;
+const { products: rawProducts = [], categories = [], theme } = shop;
+const primaryColor = theme?.primary_color || '#581C87';
+
+// Strict active products with valid images for customer storefront
+const activeProducts = (rawProducts || []).filter((p: any) => p.is_active !== false && p.image_url);
+
+// Product lookup: strictly prefer active product, fallback to first active product
+const product = activeProducts.find((p: any) => p.id === id) 
+  || rawProducts.find((p: any) => p.id === id && p.is_active !== false)
+  || activeProducts[0] 
+  || rawProducts[0];
+
+// Related suggestions: strictly active products, excluding currently viewed product
+const relatedProducts = activeProducts
+  .filter((p: any) => p.id !== product?.id)
+  .sort((a: any, b: any) => {
+    const aMatch = (a.category_id === product?.category_id || a.brand === product?.brand) ? 1 : 0;
+    const bMatch = (b.category_id === product?.category_id || b.brand === product?.brand) ? 1 : 0;
+    return bMatch - aMatch;
+  })
+  .slice(0, 12);
+
+const productMrp = Number(product?.mrp || product?.price || 0);
+const productDiscount = product?.discount !== undefined ? Number(product.discount) : (product?.price && productMrp > product.price ? Math.round(((productMrp - product.price) / productMrp) * 100) : 0);
+const sellingPrice = getSellingPrice(productMrp, productDiscount);
+
+const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+const storeHomeUrl = queryShop ? `/?shop=${queryShop}` : (isLocal && shop?.slug ? `/?shop=${shop.slug}` : '/');
+const storeCatalogUrl = queryShop ? `/catalog?shop=${queryShop}` : (isLocal && shop?.slug ? `/catalog?shop=${shop.slug}` : '/catalog');
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{product.name} | {shop.name}</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <style define:vars={{ primaryColor }}>
+    * { box-sizing: border-box; }
+    .footer-art-bg {
+      background-color: var(--primaryColor);
+    }
+    .badge-dark {
+      background-color: #0F172A;
+      color: #FFFFFF;
+    }
+    .add-btn {
+      background-color: #FFFFFF;
+      color: #0F172A;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15);
+    }
+    .add-btn:hover {
+      background-color: #0F172A;
+      color: #FFFFFF;
+    }
+  </style>
+</head>
+<body class="min-h-screen text-slate-800 bg-white relative pb-16 sm:pb-0">
+
+  <!-- Tenant Switcher & Debug Bar -->
+  <div class="bg-slate-900 text-slate-200 text-[11px] font-medium py-1 px-4 flex items-center justify-between border-b border-slate-800 select-none">
+    <div class="flex items-center space-x-2">
+      <span class="bg-emerald-500 w-2 h-2 rounded-full animate-pulse"></span>
+      <span>Storefront | <strong class="text-white uppercase">{shop.name}</strong></span>
+    </div>
+    <div class="flex items-center space-x-3 text-slate-300">
+      <a href={`/catalog?shop=${shop.slug}`} class="hover:text-white no-underline text-purple-300 font-bold">🛍️ View Full Catalog</a>
+      <button onclick="clearFullCart(); alert('Cart has been reset to 0 items!');" class="hover:text-rose-300 text-rose-400 font-bold cursor-pointer bg-transparent border-0">🗑️ Reset Cart</button>
+      <a href={`/?shop=${shop.slug}`} class="hover:text-white no-underline text-slate-300 font-bold">🏠 Store Home</a>
+    </div>
+  </div>
+
+  <!-- 100% Generic Reusable Store Header Component -->
+  <StoreHeader shop={shop} primaryColor={primaryColor} />
+
+  <!-- Product Details Layout -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-10">
+    
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-8 md:gap-10">
+      
+      <!-- Left Column: Thumbnails + Main Image -->
+      <div class="md:col-span-7 flex flex-col-reverse sm:flex-row gap-4">
+        <div class="flex sm:flex-col gap-3 shrink-0 overflow-x-auto sm:overflow-visible">
+          <img src={product.image_url} class="w-16 h-16 object-contain p-1 bg-white border-2 border-slate-900 cursor-pointer rounded shadow-xs" alt="Product View 1" />
+        </div>
+
+        <div class="flex-1 bg-white rounded-lg overflow-hidden border border-slate-200 cursor-pointer group relative p-4 flex items-center justify-center min-h-[350px] sm:min-h-[480px]" onclick={`window.open('${product.image_url}', '_blank')`} title="Click to view full-resolution image">
+          <img id="main-product-img" src={product.image_url} alt={product.name} class="w-full h-80 sm:h-[480px] md:h-[520px] object-contain group-hover:scale-105 transition-transform duration-300" />
+          <span class="absolute bottom-3 right-3 bg-slate-900/80 text-white text-[10px] font-bold px-2.5 py-1 rounded backdrop-blur-xs flex items-center space-x-1">
+            <span>🔍 Zoom 4K Image</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Right Column: Details & Actions -->
+      <div class="md:col-span-5 space-y-5 sm:space-y-6">
+        
+        <div>
+          <h1 class="font-serif-title text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight">{product.name}</h1>
+          <div class="mt-3 flex items-baseline space-x-2 text-sm">
+            <span class="font-bold text-slate-900">Price :</span>
+            <span class="font-extrabold text-rose-600 text-lg">₹ {sellingPrice}</span>
+            {productMrp > sellingPrice && (
+              <span class="line-through text-slate-400">₹ {productMrp}</span>
+            )}
+            {productDiscount > 0 && (
+              <span class="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded text-xs">
+                {productDiscount}% OFF
+              </span>
+            )}
+          </div>
+          <p class="text-xs text-slate-500 mt-1">Inclusive of all taxes</p>
+        </div>
+
+        <!-- Store USPs -->
+        <div class="border-y border-slate-200 py-3.5 grid grid-cols-3 gap-2 text-center text-xs">
+          <div>
+            <div class="text-base sm:text-lg">🚚</div>
+            <div class="font-bold text-slate-800 text-[11px] sm:text-xs">Free delivery</div>
+          </div>
+          <div>
+            <div class="text-base sm:text-lg">🛡️</div>
+            <div class="font-bold text-slate-800 text-[11px] sm:text-xs">Secure payments</div>
+          </div>
+          <div>
+            <div class="text-base sm:text-lg">💵</div>
+            <div class="font-bold text-slate-800 text-[11px] sm:text-xs">Cash on delivery</div>
+          </div>
+        </div>
+
+        <!-- Quantity Selector -->
+        <div class="flex items-center space-x-4">
+          <span class="text-xs font-bold text-slate-700">Quantity:</span>
+          <div class="flex items-center border border-slate-300 rounded px-3 py-1.5 text-xs font-bold space-x-3 bg-white shadow-xs">
+            <button type="button" onclick="adjustPageQty(-1)" class="cursor-pointer font-bold px-2 py-0.5 hover:bg-slate-200 rounded text-slate-800 transition-colors text-sm">-</button>
+            <input id="product-qty-input" type="text" value="1" readonly class="w-8 text-center text-sm font-extrabold text-slate-900 border-none bg-transparent outline-none select-none" />
+            <button type="button" onclick="adjustPageQty(1)" class="cursor-pointer font-bold px-2 py-0.5 hover:bg-slate-200 rounded text-slate-800 transition-colors text-sm">+</button>
+          </div>
+        </div>
+
+        <!-- Delivery Pincode Checker -->
+        <div class="space-y-2">
+          <label class="text-xs font-bold text-slate-800 uppercase tracking-wider block">Delivery Date</label>
+          <div class="flex">
+            <input type="text" placeholder="Enter pincode to check" class="flex-1 px-3 py-2 border border-slate-300 text-xs focus:outline-none" />
+            <button class="px-5 py-2 border border-slate-900 bg-slate-900 text-white text-xs font-bold uppercase cursor-pointer">CHECK</button>
+          </div>
+          <div class="text-xs text-emerald-700 font-medium">📍 Next day delivery available in select locations!</div>
+        </div>
+
+        <!-- Promotional Box -->
+        <div class="border border-rose-200 bg-rose-50/50 p-3.5 rounded-lg space-y-1">
+          <span class="text-xs font-extrabold text-rose-600 uppercase tracking-wider block">BEST OFFERS FOR YOU!</span>
+          <p class="text-xs font-bold text-slate-900">Get ₹200 OFF on your 1st order | Code: YESFANCY200</p>
+          <p class="text-[11px] text-slate-500">Valid on a min. purchase of ₹1,000</p>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="space-y-3 pt-2">
+          <button 
+            id="add-to-cart-btn"
+            type="button"
+            onclick="handleAddToCartClick()"
+            style={`background-color: ${primaryColor}`}
+            class="w-full py-3.5 text-white font-extrabold text-xs uppercase tracking-widest rounded-sm flex items-center justify-center space-x-2.5 cursor-pointer shadow-md hover:opacity-90 transition-all select-none"
+          >
+            <span id="add-to-cart-icon" class="w-5 h-5 rounded-full bg-white text-slate-900 flex items-center justify-center font-black text-sm shadow-xs shrink-0">+</span>
+            <span id="add-to-cart-label">ADD TO CART</span>
+          </button>
+
+          <div id="in-cart-actions" class="hidden flex items-center justify-between text-xs py-1.5 px-3 bg-emerald-50 border border-emerald-200 rounded">
+            <span class="text-emerald-800 font-bold flex items-center gap-1">✓ Item currently in your cart</span>
+            <button type="button" onclick="removeFromCartPage()" class="text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer">Remove from Cart</button>
+          </div>
+          
+          <a 
+            id="buy-whatsapp-direct"
+            href={`https://wa.me/918197921458?text=${encodeURIComponent(`Hi ${shop.name}, I want to order ${product.name} (Rs. ${sellingPrice}${productDiscount > 0 ? `, ${productDiscount}% OFF` : ''}) via Cash on Delivery.`)}`}
+            target="_blank"
+            style={`background-color: ${primaryColor}`}
+            class="w-full py-3.5 text-white font-extrabold text-xs uppercase tracking-widest rounded flex items-center justify-center space-x-2 no-underline cursor-pointer shadow-md hover:opacity-90 transition-all"
+          >
+            <span>BUY NOW VIA WHATSAPP (COD)</span>
+          </a>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Bottom Hooking Carousel: Related Active Products -->
+    {relatedProducts.length > 0 && (
+      <section class="pt-8 space-y-4">
+        <div class="text-center">
+          <span class="bg-slate-900 text-white font-extrabold text-xs sm:text-sm uppercase px-6 sm:px-8 py-2 tracking-widest inline-block shadow-sm">
+            MORE FROM THE COLLECTION
+          </span>
+        </div>
+
+        <div class="flex space-x-4 overflow-x-auto no-scrollbar py-2">
+          {relatedProducts.map(p => {
+            const pMrp = Number(p.mrp || p.price || 0);
+            const pDisc = p.discount !== undefined ? Number(p.discount) : (p.price && pMrp > p.price ? Math.round(((pMrp - p.price) / pMrp) * 100) : 0);
+            const pPrice = getSellingPrice(pMrp, pDisc);
+            const pShopSlug = shop?.slug || queryShop || '';
+
+            return (
+              <div class="w-44 sm:w-56 shrink-0 space-y-2 group cursor-pointer" onclick={`window.location.href='/product/${p.id}${pShopSlug ? `?shop=${pShopSlug}` : ''}'`}>
+                <div class="relative aspect-square overflow-hidden bg-[#F5F3EE] rounded-lg">
+                  <img src={p.image_url} alt={p.name} class="w-full h-full object-contain p-2 mix-blend-multiply group-hover:scale-105 transition-transform duration-300" />
+                  {pDisc > 0 && (
+                    <span class="absolute top-2 left-2 bg-emerald-700 text-white text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded shadow-xs">
+                      {pDisc}% OFF
+                    </span>
+                  )}
+                </div>
+                <h4 class="text-xs font-bold text-slate-900 line-clamp-1">{p.name}</h4>
+                <div class="flex items-baseline space-x-1.5 text-xs">
+                  <span class="font-extrabold text-rose-600">₹ {pPrice}</span>
+                  {pMrp > pPrice && (
+                    <span class="line-through text-slate-400 text-[10px]">₹ {pMrp}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    )}
+
+  </main>
+
+  <!-- 100% Generic Reusable Store Footer Component -->
+  <StoreFooter shopName={shop.name} logoUrl={shop.logo_url} primaryColor={primaryColor} />
+
+  <!-- Track Order Drawer -->
+  <div id="track-overlay" onclick="toggleTrackDrawer(false)" style="transition: opacity 0.3s ease; opacity: 0; pointer-events: none;" class="fixed inset-0 bg-slate-950/60 z-50"></div>
+  <aside id="track-drawer" style="transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform: translateX(100%);" class="fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-white z-50 shadow-2xl flex flex-col justify-between p-4 sm:p-6">
+    <div class="space-y-6">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-4">
+        <div class="flex items-center space-x-2">
+          <svg class="w-5 h-5 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+          <h3 class="font-extrabold text-sm uppercase tracking-wider text-slate-900">Track Your Order</h3>
+        </div>
+        <button onclick="toggleTrackDrawer(false)" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer" title="Close">✕</button>
+      </div>
+
+      <p class="text-xs text-slate-600">Enter your phone number or Order ID to check real order status.</p>
+
+      <div class="space-y-3">
+        <input id="track-input" type="text" placeholder="Enter Phone (e.g. 8197921458)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
+        <button onclick="lookupOrderStatus()" class="w-full py-2.5 bg-slate-900 text-white font-bold text-xs uppercase tracking-wider rounded cursor-pointer hover:bg-slate-800">Check Status</button>
+      </div>
+
+      <div id="track-status-box" class="pt-4 border-t border-slate-200 text-xs">
+        <div class="text-center py-6 border border-dashed border-slate-300 rounded-lg space-y-1">
+          <div class="text-2xl">📦</div>
+          <div class="font-bold text-slate-700">No Active Order Selected</div>
+          <div class="text-[11px] text-slate-400">Enter your phone number above to view live status.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-xs text-center text-slate-500 border-t border-slate-200 pt-4">
+      Need store help? Call: <a href="tel:+918197921458" class="font-bold text-slate-900">+91 8197921458</a>
+    </div>
+  </aside>
+
+  <!-- Cart Drawer -->
+  <div id="cart-overlay" onclick="toggleCartDrawer(false)" style="transition: opacity 0.3s ease; opacity: 0; pointer-events: none;" class="fixed inset-0 bg-slate-950/60 z-50"></div>
+  <aside id="cart-drawer" style="transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform: translateX(100%);" class="fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-white z-50 shadow-2xl flex flex-col justify-between">
+    
+    <div class="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+      <div class="flex items-center space-x-2">
+        <svg class="w-5 h-5 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+        <span class="font-extrabold text-sm uppercase tracking-wider text-slate-900">Your Cart</span>
+        <span id="cart-header-badge" class="bg-slate-900 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">0 ITEMS</span>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button onclick="clearFullCart()" class="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer" title="Empty Cart">Clear All</button>
+        <button onclick="toggleCartDrawer(false)" class="w-8 h-8 rounded-full bg-white hover:bg-slate-200 text-slate-700 border border-slate-200 flex items-center justify-center transition-colors cursor-pointer" title="Close Cart">✕</button>
+      </div>
+    </div>
+
+    <div class="bg-slate-900 text-white text-xs font-semibold py-2 px-4 text-center">
+      Save more on Prepaid Orders & Instant WhatsApp Checkout!
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      <div id="cart-items-list" class="space-y-3"></div>
+
+      <div class="pt-4 border-t border-slate-200 space-y-3">
+        <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-900">Customer Delivery Info</h4>
+        <div class="space-y-2">
+          <input id="checkout-name" type="text" placeholder="Enter Full Name (e.g. Divya Kodukula)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
+          <input id="checkout-phone" type="text" placeholder="Enter Phone Number (e.g. 8197921458)" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
+          <input id="checkout-address" type="text" placeholder="Enter Delivery Address / Store Pickup" class="w-full px-3 py-2 border border-slate-300 rounded text-xs focus:outline-none focus:border-slate-900" />
+        </div>
+      </div>
+    </div>
+
+    <div class="p-4 border-t border-slate-200 bg-slate-50 space-y-2.5">
+      <div class="space-y-1 text-xs border-b border-slate-200 pb-2">
+        <div class="flex justify-between items-center text-slate-500">
+          <span>Total MRP:</span>
+          <span id="cart-total-mrp" class="font-bold text-slate-700">₹ 0</span>
+        </div>
+        <div id="cart-savings-row" class="hidden flex justify-between items-center text-emerald-700 font-bold">
+          <span>Total Savings:</span>
+          <span id="cart-savings-val">- ₹ 0</span>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between font-bold text-slate-900 text-sm">
+        <span>Total Payable (COD):</span>
+        <span id="cart-total-price" class="text-rose-600 font-extrabold text-base">₹ 0</span>
+      </div>
+
+      <button 
+        onclick="placeRealWhatsAppOrder()"
+        class="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs uppercase tracking-wider rounded flex items-center justify-center space-x-2 cursor-pointer shadow-md"
+      >
+        <span>Place Order & Open WhatsApp (COD)</span>
+      </button>
+    </div>
+
+  </aside>
+
+  <!-- Mobile Bottom Sticky Navigation Bar -->
+  <div class="sm:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 z-40 flex items-center justify-around py-2 shadow-lg">
+    <a href={storeHomeUrl} class="flex flex-col items-center text-slate-700 no-underline text-[10px] font-bold">
+      <span class="text-base">🏠</span>
+      <span>Home</span>
+    </a>
+    <a href={storeCatalogUrl} class="flex flex-col items-center text-slate-700 no-underline text-[10px] font-bold">
+      <span class="text-base">🛍️</span>
+      <span>Catalog</span>
+    </a>
+    <button onclick="toggleTrackDrawer(true)" class="flex flex-col items-center text-slate-700 text-[10px] font-bold cursor-pointer">
+      <span class="text-base">📦</span>
+      <span>Track Order</span>
+    </button>
+    <button onclick="toggleCartDrawer(true)" class="flex flex-col items-center text-slate-700 text-[10px] font-bold cursor-pointer relative">
+      <span class="text-base">🛒</span>
+      <span>Cart</span>
+    </button>
+  </div>
+
+  <script is:inline define:vars={{
+    currentShopSlug: shop?.slug || 'yesfancy',
+    currentShopName: shop?.name || 'Yes Fancy',
+    prodId: product?.id || '',
+    prodName: product?.name || '',
+    prodPrice: sellingPrice,
+    prodDiscount: productDiscount,
+    prodMrp: productMrp,
+    prodImg: product?.image_url || '',
+    prodStock: product?.stock ?? 100,
+    shopPhone: shop?.phone || '918197921458'
+  }}>
+    let cart = {};
+
+    function updatePageUI() {
+      const el = document.getElementById('product-qty-input');
+      const btnLabel = document.getElementById('add-to-cart-label');
+      const btnIcon = document.getElementById('add-to-cart-icon');
+      const inCartActions = document.getElementById('in-cart-actions');
+      const inCartItem = cart[prodId];
+
+      const currentQty = inCartItem ? inCartItem.qty : (el ? parseInt(el.value || 1) : 1);
+      if (el) el.value = currentQty;
+
+      if (inCartItem) {
+        if (btnLabel) btnLabel.innerText = `✓ IN CART (${inCartItem.qty}) • VIEW CART`;
+        if (btnIcon) btnIcon.innerText = '🛒';
+        if (inCartActions) inCartActions.classList.remove('hidden');
+      } else {
+        if (btnLabel) btnLabel.innerText = 'ADD TO CART';
+        if (btnIcon) btnIcon.innerText = '+';
+        if (inCartActions) inCartActions.classList.add('hidden');
+      }
+
+      const waBtn = document.getElementById('buy-whatsapp-direct');
+      if (waBtn) {
+        const total = currentQty * prodPrice;
+        const msg = `Hi ${currentShopName}, I want to order ${currentQty}x ${prodName} (Total: Rs. ${total}) via Cash on Delivery.`;
+        waBtn.href = `https://wa.me/${shopPhone}?text=${encodeURIComponent(msg)}`;
+      }
+    }
+
+    window.removeFromCartPage = function() {
+      if (cart[prodId]) {
+        delete cart[prodId];
+        window.saveCart();
+        window.toggleCartDrawer(false);
+      }
+    };
+
+    window.adjustPageQty = function(delta) {
+      const el = document.getElementById('product-qty-input');
+      let currentVal = parseInt(el?.value || (cart[prodId]?.qty || 1));
+      let newVal = Math.max(1, currentVal + delta);
+      if (el) el.value = newVal;
+
+      // Update WhatsApp direct order link
+      const waBtn = document.getElementById('buy-whatsapp-direct');
+      if (waBtn) {
+        const total = newVal * prodPrice;
+        const msg = `Hi ${currentShopName}, I want to order ${newVal}x ${prodName} (Total: Rs. ${total}) via Cash on Delivery.`;
+        waBtn.href = `https://wa.me/${shopPhone}?text=${encodeURIComponent(msg)}`;
+      }
+
+      // Synchronize immediately to cart and open cart drawer
+      if (cart[prodId]) {
+        cart[prodId].qty = newVal;
+      } else {
+        cart[prodId] = {
+          id: prodId,
+          name: prodName,
+          price: prodPrice,
+          mrp: prodMrp || prodPrice,
+          discount: prodDiscount || 0,
+          image: prodImg,
+          image_url: prodImg,
+          qty: newVal
+        };
+      }
+      window.saveCart();
+      window.toggleCartDrawer(true);
+    };
+
+    window.handleAddToCartClick = function() {
+      const el = document.getElementById('product-qty-input');
+      const selectedQty = Math.max(1, parseInt(el?.value || 1));
+
+      if (cart[prodId]) {
+        cart[prodId].qty = selectedQty;
+        window.saveCart();
+        window.toggleCartDrawer(true);
+        return;
+      }
+
+      cart[prodId] = {
+        id: prodId,
+        name: prodName,
+        price: prodPrice,
+        mrp: prodMrp || prodPrice,
+        discount: prodDiscount || 0,
+        image: prodImg,
+        image_url: prodImg,
+        qty: selectedQty
+      };
+
+      window.saveCart();
+      window.toggleCartDrawer(true);
+    };
+
+    window.loadCart = function() {
+      try {
+        localStorage.removeItem('yesfancy_cart');
+        localStorage.removeItem('oorumart_cart');
+
+        const saved = localStorage.getItem(`oorumart_cart_${currentShopSlug}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            cart = parsed;
+          } else {
+            cart = {};
+          }
+        }
+      } catch (e) { cart = {}; }
+      window.renderCart();
+      updatePageUI();
+    };
+
+    window.saveCart = function() {
+      try { localStorage.setItem(`oorumart_cart_${currentShopSlug}`, JSON.stringify(cart)); } catch (e) {}
+      window.renderCart();
+      updatePageUI();
+    };
+
+    window.addToCart = function(id, name, price, mrp, image, stock = 100, qtyOrDiscount = 1, maybeDiscount = 0) {
+      if (stock !== undefined && Number(stock) <= 0) {
+        alert('Sorry, this product is currently out of stock!');
+        return;
+      }
+
+      // If called with (id, name, price, mrp, image, stock, discount) from cards vs (id, name, price, mrp, image, stock, qty)
+      let qtyToAdd = 1;
+      let disc = 0;
+      if (maybeDiscount !== undefined && maybeDiscount !== 0) {
+        disc = Number(maybeDiscount || 0);
+        qtyToAdd = Math.max(1, parseInt(qtyOrDiscount || 1));
+      } else {
+        qtyToAdd = Math.max(1, parseInt(qtyOrDiscount || 1));
+      }
+
+      const img = image || '/images/placeholder.webp';
+
+      if (cart[id]) {
+        cart[id].qty += qtyToAdd;
+        if (!cart[id].image) cart[id].image = img;
+        if (!cart[id].image_url) cart[id].image_url = img;
+      } else {
+        cart[id] = { id, name, price, mrp: mrp || price, discount: disc, image: img, image_url: img, qty: qtyToAdd };
+      }
+
+      window.saveCart();
+      window.toggleCartDrawer(true);
+    };
+
+    window.updateCartQty = function(id, delta) {
+      if (cart[id]) {
+        cart[id].qty += delta;
+        if (cart[id].qty <= 0) delete cart[id];
+      }
+      window.saveCart();
+    };
+
+    window.clearFullCart = function() {
+      cart = {};
+      window.saveCart();
+    };
+
+    window.renderCart = function() {
+      const itemsList = document.getElementById('cart-items-list');
+      const badge = document.getElementById('cart-count-badge');
+      const headerBadge = document.getElementById('cart-header-badge');
+      const totalPriceElem = document.getElementById('cart-total-price');
+      const totalMrpElem = document.getElementById('cart-total-mrp');
+      const savingsVal = document.getElementById('cart-savings-val');
+      const savingsRow = document.getElementById('cart-savings-row');
+
+      let totalQty = 0;
+      let totalPrice = 0;
+      let totalMrp = 0;
+      if (itemsList) itemsList.innerHTML = '';
+
+      const keys = Object.keys(cart);
+      if (keys.length === 0) {
+        if (itemsList) {
+          itemsList.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-semibold">Your cart for ${currentShopName} is empty. Add items to checkout!</div>`;
+        }
+      } else {
+        keys.forEach(id => {
+          const item = cart[id];
+          const itemMrp = Number(item.mrp || item.price || 0);
+          const itemDisc = Number(item.discount || 0);
+          const itemPrice = Math.round(itemMrp * (1 - itemDisc / 100));
+          const imgUrl = item.image_url || item.image || item.imageUrl || '/images/placeholder.webp';
+
+          totalQty += item.qty;
+          totalPrice += itemPrice * item.qty;
+          totalMrp += itemMrp * item.qty;
+
+          if (itemsList) {
+            const div = document.createElement('div');
+            div.className = 'border border-slate-200 rounded-lg p-3 flex space-x-3 items-center';
+            div.innerHTML = `
+              <img src="${imgUrl}" onerror="this.onerror=null;this.src='/images/placeholder.webp';" alt="${item.name || 'Product'}" class="w-14 h-14 object-contain rounded-md border border-slate-100 bg-slate-50 p-1" />
+              <div class="flex-1 space-y-1 min-w-0">
+                <h4 class="text-xs font-bold text-slate-900 truncate">${item.name}</h4>
+                <div class="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                  <span class="text-rose-600">₹ ${itemPrice}</span>
+                  ${itemDisc > 0 ? `<span class="text-slate-400 font-normal line-through text-[11px]">₹ ${itemMrp}</span>
+                  <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded">${itemDisc}% OFF</span>` : ''}
+                </div>
+              </div>
+              <div class="flex items-center space-x-2 border border-slate-300 rounded px-2 py-1 text-xs">
+                <button onclick="updateCartQty('${id}', -1)" class="font-bold cursor-pointer px-1 hover:text-rose-600">-</button>
+                <span class="font-bold px-1">${item.qty}</span>
+                <button onclick="updateCartQty('${id}', 1)" class="font-bold cursor-pointer px-1 hover:text-emerald-600">+</button>
+              </div>
+            `;
+            itemsList.appendChild(div);
+          }
+        });
+      }
+
+      const totalSavings = Math.max(0, totalMrp - totalPrice);
+
+      if (badge) badge.innerText = totalQty;
+      if (headerBadge) headerBadge.innerText = `${totalQty} ${totalQty === 1 ? 'ITEM' : 'ITEMS'}`;
+      if (totalPriceElem) totalPriceElem.innerText = `₹ ${totalPrice}`;
+      if (totalMrpElem) totalMrpElem.innerText = `₹ ${totalMrp}`;
+      if (savingsVal) savingsVal.innerText = `- ₹ ${totalSavings}`;
+      if (savingsRow) {
+        if (totalSavings > 0) savingsRow.classList.remove('hidden');
+        else savingsRow.classList.add('hidden');
+      }
+    };
+
+    window.toggleCartDrawer = function(open) {
+      const overlay = document.getElementById('cart-overlay');
+      const drawer = document.getElementById('cart-drawer');
+      if (!overlay || !drawer) return;
+      if (open) {
+        overlay.classList.remove('opacity-0', 'pointer-events-none');
+        overlay.style.opacity = '1';
+        overlay.style.pointerEvents = 'auto';
+        drawer.style.transform = 'translateX(0)';
+      } else {
+        overlay.classList.add('opacity-0', 'pointer-events-none');
+        overlay.style.opacity = '0';
+        overlay.style.pointerEvents = 'none';
+        drawer.style.transform = 'translateX(100%)';
+      }
+    };
+
+    window.toggleTrackDrawer = function(open) {
+      const overlay = document.getElementById('track-overlay');
+      const drawer = document.getElementById('track-drawer');
+      if (!overlay || !drawer) return;
+      if (open) {
+        overlay.classList.remove('opacity-0', 'pointer-events-none');
+        overlay.style.opacity = '1';
+        overlay.style.pointerEvents = 'auto';
+        drawer.style.transform = 'translateX(0)';
+      } else {
+        overlay.classList.add('opacity-0', 'pointer-events-none');
+        overlay.style.opacity = '0';
+        overlay.style.pointerEvents = 'none';
+        drawer.style.transform = 'translateX(100%)';
+      }
+    };
+
+    window.placeRealWhatsAppOrder = async function() {
+      const keys = Object.keys(cart);
+      if (keys.length === 0) {
+        alert('Your cart is empty! Please add products to checkout.');
+        return;
+      }
+
+      const nameInput = document.getElementById('checkout-name')?.value.trim() || 'Valued Customer';
+      const phoneInput = document.getElementById('checkout-phone')?.value.trim();
+      const addressInput = document.getElementById('checkout-address')?.value.trim() || 'Store Pickup';
+
+      if (!phoneInput) {
+        alert('Please enter your phone number to place order & track delivery!');
+        return;
+      }
+
+      let totalPrice = 0;
+      let itemLines = [];
+      keys.forEach(id => {
+        const item = cart[id];
+        totalPrice += item.price * item.qty;
+        itemLines.push(`- ${item.name} (Qty: ${item.qty}) = Rs. ${item.price * item.qty}`);
+      });
+
+      const prefix = (currentShopSlug || 'OM').toUpperCase().slice(0, 3);
+      const orderId = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const newOrder = {
+        order_id: orderId,
+        shop_slug: currentShopSlug,
+        customer_name: nameInput,
+        phone: phoneInput,
+        address: addressInput,
+        items: itemLines,
+        total: totalPrice,
+        timestamp: new Date().toLocaleString(),
+        status: 'Order Placed & Processing'
+      };
+
+      try {
+        await fetch('/api/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newOrder)
+        });
+      } catch (e) {
+        console.error('Error posting order to API:', e);
+      }
+
+      try {
+        let orders = JSON.parse(localStorage.getItem(`oorumart_orders_${currentShopSlug}`) || '[]');
+        orders.unshift(newOrder);
+        localStorage.setItem(`oorumart_orders_${currentShopSlug}`, JSON.stringify(orders));
+      } catch (e) {}
+
+      cart = {};
+      window.saveCart();
+      window.toggleCartDrawer(false);
+      window.toggleTrackDrawer(true);
+
+      const trackInput = document.getElementById('track-input');
+      if (trackInput) trackInput.value = phoneInput;
+
+      alert(`🎉 Order #${orderId} (₹ ${totalPrice}) has been sent directly to ${currentShopName}!`);
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', window.loadCart);
+    } else {
+      window.loadCart();
+    }
+  </script>
+
+</body>
+</html>
