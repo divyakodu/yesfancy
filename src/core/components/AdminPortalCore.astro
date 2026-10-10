@@ -2,16 +2,16 @@
 export const prerender = false;
 
 import '../styles/global.css';
-import { getAllShopsConfigAsync } from '../lib/getShopConfig';
+import { getStoreConfigAsync } from '../lib/getShopConfig';
 
 export interface Props {
   shopSlug?: string;
 }
 
-const { shopSlug } = Astro.props;
-const allShops = await getAllShopsConfigAsync();
-const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || (typeof process !== 'undefined' ? process.env?.PUBLIC_SUPABASE_URL : '') || '';
-const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process.env?.PUBLIC_SUPABASE_ANON_KEY : '') || '';
+const shop = await getStoreConfigAsync();
+const allShops = shop ? [shop] : [];
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || (typeof process !== 'undefined' ? process.env?.PUBLIC_SUPABASE_URL : '') || 'https://ebsrmjnegdhpnlbxcxfm.supabase.co';
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process.env?.PUBLIC_SUPABASE_ANON_KEY : '') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVic3Jtam5lZ2RocG5sYnhjeGZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2MTY0MDAsImV4cCI6MjEwNzE5MjQwMH0.zP6UtvlbN3Hx8E2MbMcNk9fx4JUQpdCqrrvigytIN7M';
 ---
 
 <!DOCTYPE html>
@@ -1321,7 +1321,7 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
         const res = await fetch('/api/products', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shop_slug: currentShop.slug, ids: selectedIds })
+          body: JSON.stringify({ ids: selectedIds })
         });
         const data = await res.json();
         if (data.success) {
@@ -1346,7 +1346,7 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
         const res = await fetch('/api/products', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shop_slug: currentShop.slug, ids: selectedIds, is_active: newStatus })
+          body: JSON.stringify({ ids: selectedIds, is_active: newStatus })
         });
         const data = await res.json();
         if (data.success) {
@@ -1371,7 +1371,7 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
         const res = await fetch('/api/products', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shop_slug: currentShop.slug, id, stock: newStock })
+          body: JSON.stringify({ id, stock: newStock })
         });
         const data = await res.json();
         if (data.success) {
@@ -1396,7 +1396,7 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
         const res = await fetch('/api/products', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shop_slug: currentShop.slug, ids: selectedIds, stock: newStock })
+          body: JSON.stringify({ ids: selectedIds, stock: newStock })
         });
         const data = await res.json();
         if (data.success) {
@@ -1703,7 +1703,6 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            shop_slug: currentShop.slug,
             id,
             label,
             tag,
@@ -1756,7 +1755,6 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            shop_slug: currentShop.slug,
             title,
             subtitle,
             cta_link,
@@ -1813,7 +1811,6 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            shop_slug: currentShop.slug,
             id: prodId || undefined,
             name,
             mrp,
@@ -1896,7 +1893,6 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || (typeof proc
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            slug: currentShop.slug,
             name,
             template_key,
             tagline,

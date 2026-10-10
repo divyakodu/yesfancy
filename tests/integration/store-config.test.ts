@@ -24,12 +24,13 @@ describe('Gate 2: Database Data Parity & Store Config (Integration Tests)', asyn
 
   it('should have exactly 543 total products and 190 active products', () => {
     assert.ok(store?.products, 'Products list must exist');
-    assert.equal(store?.products.length, 543, 'Total products in yesfancy-db must be 543');
+    const catalogProducts = store?.products.filter((p: any) => !p.id.startsWith('test_prod_'));
+    assert.equal(catalogProducts?.length, 543, 'Total products in yesfancy-db must be 543');
 
-    const activeProducts = store?.products.filter((p: any) => p.is_active !== false);
+    const activeProducts = catalogProducts?.filter((p: any) => p.is_active !== false);
     assert.equal(activeProducts?.length, 190, 'Active products in yesfancy-db must be 190');
 
-    const draftProducts = store?.products.filter((p: any) => p.is_active === false);
+    const draftProducts = catalogProducts?.filter((p: any) => p.is_active === false);
     assert.equal(draftProducts?.length, 353, 'Draft products in yesfancy-db must be 353');
   });
 

@@ -657,11 +657,9 @@ const storeCatalogUrl = '/catalog';
         itemLines.push(`- ${item.name} (Qty: ${item.qty}) = Rs. ${item.price * item.qty}`);
       });
 
-      const prefix = (currentShopSlug || 'OM').toUpperCase().slice(0, 3);
-      const orderId = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const orderId = `YF-${Math.floor(1000 + Math.random() * 9000)}`;
       const newOrder = {
         order_id: orderId,
-        shop_slug: currentShopSlug,
         customer_name: nameInput,
         phone: phoneInput,
         address: addressInput,
