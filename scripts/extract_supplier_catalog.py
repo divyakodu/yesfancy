@@ -758,7 +758,7 @@ class CatalogExtractor:
             self.parse_hasbro(f)
 
         # 5. Nerf Blasters (Check input_dir and project source_pdfs)
-        nerf_paths = list(self.input_dir.glob("*NERF*.pdf")) + list(Path("/Users/divyakodukula/Documents/oorumart/data/source_pdfs").glob("*NERF*.pdf"))
+        nerf_paths = list(self.input_dir.glob("*NERF*.pdf")) + list(Path("data/source_pdfs").glob("*NERF*.pdf"))
         if nerf_paths:
             self.parse_nerf(nerf_paths[0])
 
@@ -795,7 +795,8 @@ class CatalogExtractor:
 
 def main():
     parser = argparse.ArgumentParser(description="Extract supplier catalogs into Excel & JSON drafts.")
-    parser.add_argument("--input-dir", default="/Users/divyakodukula/Downloads/download_plugin", help="Directory containing catalogs")
+    default_input_dir = str(Path.home() / "Downloads" / "download_plugin")
+    parser.add_argument("--input-dir", default=default_input_dir, help="Directory containing catalogs")
     parser.add_argument("--output-excel", default="data/draft_catalog_import.xlsx", help="Destination Excel path")
     parser.add_argument("--output-json", default="data/draft_catalog_import.json", help="Destination JSON path")
     parser.add_argument("--no-ocr", action="store_true", help="Disable OCR fallback")
