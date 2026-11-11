@@ -123,3 +123,28 @@ pip install pymupdf openpyxl pytesseract pillow
 
 - **Storefront Tracking**: Customer inputs 10-digit mobile number in `📦 Track Order` drawer to view their 5 latest orders with a 4-step progress stepper (`Placed ➔ Packing ➔ Out for Delivery ➔ Delivered`).
 - **Free Direct WhatsApp Dispatcher**: Admin console generates rich multi-line receipts and opens them in WhatsApp Web (reusing a single named tab `yesfancy_whatsapp_tab`) or native desktop app (`whatsapp://`) with **zero Meta API fees**.
+
+---
+
+## 👥 8. Multi-User Mac Setup (`divyakodukula` & `Ravi`)
+
+Both profiles belong to macOS `admin` and `staff` groups on the same machine.
+- Profile A: `divyakodukula` (Original repo path: `/Users/divyakodukula/Documents/yesfancy`)
+- Profile B: `Ravi` (Real name: *Achalla Ravi Kiran*, Home: `/Users/Ravi`)
+
+### Access Configuration
+macOS Access Control Lists (ACL) are active on the folder:
+```bash
+chmod +a "user:Ravi allow list,search" /Users/divyakodukula/Documents
+chmod -R +a "user:Ravi allow list,add_file,search,delete,add_subdirectory,file_inherit,directory_inherit" /Users/divyakodukula/Documents/yesfancy
+```
+
+### Initializing Access inside Ravi's Profile
+When logged in as `Ravi`, execute:
+```bash
+bash /Users/divyakodukula/Documents/yesfancy/setup_ravi_access.sh
+```
+This automatically:
+1. Links `/Users/divyakodukula/Documents/yesfancy` to `~/Documents/yesfancy`.
+2. Registers the YesFancy Claude Skill into `~/.claude/skills/yesfancy/SKILL.md`.
+3. Ensures immediate two-way real-time editing without git conflicts or permission issues.
