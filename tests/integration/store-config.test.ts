@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { getStoreConfigAsync } from '../../src/core/lib/getShopConfig';
+import { supabase } from '../../src/core/lib/supabase';
 
 describe('Gate 2: Database Data Parity & Store Config (Integration Tests)', async () => {
   const store = await getStoreConfigAsync();
@@ -44,6 +45,20 @@ describe('Gate 2: Database Data Parity & Store Config (Integration Tests)', asyn
       assert.ok(p.image_url && p.image_url.trim().length > 0, `Active product ${p.id} must have image_url`);
       assert.notEqual(p.image_url, '/images/placeholder.webp', `Active product ${p.id} must not have placeholder`);
     }
+  });
+
+  it('getStoreConfigAsync must return every row in products — not truncated by a PostgREST page cap', async () => {
+    assert.ok(supabase, 'Supabase client must be configured for this check');
+    const { count, error } = await supabase!
+      .from('products')
+      .select('id', { count: 'exact', head: true });
+    assert.equal(error, null, `Count query must not error: ${error?.message}`);
+    assert.ok(typeof count === 'number', 'Exact row count must be a number');
+    assert.equal(
+      store?.products.length,
+      count,
+      `getStoreConfigAsync() returned ${store?.products.length} products but the DB has ${count} — a silent fetch cap (e.g. PostgREST's default 1000-row limit) is dropping rows`
+    );
   });
 
   it('should have exactly 3 hero slides configured linking to specific categories', () => {
