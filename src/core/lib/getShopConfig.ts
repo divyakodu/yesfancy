@@ -139,11 +139,20 @@ export async function getStoreConfigAsync(): Promise<StoreConfig | null> {
         }))
       : ORIGINAL_YESFANCY_CATEGORIES;
 
-    // 3. Fetch products
-    const { data: products } = await supabase
-      .from('products')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // 3. Fetch products (paginated — PostgREST caps a single select at 1000 rows,
+    // which would silently drop older rows as the catalog grows past that size)
+    const products: any[] = [];
+    const PAGE_SIZE = 1000;
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data: page } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+      if (!page || page.length === 0) break;
+      products.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
 
     // 4. Fetch hero slides
     const { data: dbSlides } = await supabase
